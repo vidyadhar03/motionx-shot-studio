@@ -221,6 +221,8 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
         prov = settings.agent_provider
         return {"provider": prov, "model": agent.default_model(prov), "live": prov != "scripted",
                 "budget_usd": settings.agent_budget_usd, "spent_usd": agent.store.live_spend_usd(),
+                "max_live_requests": settings.agent_max_live_requests, "live_requests": agent.store.live_requests(),
+                "thinking": settings.agent_thinking,
                 "max_turns": settings.agent_max_turns, "max_output_tokens": settings.agent_max_output_tokens,
                 "credentials": {"gemini": bool(settings.gemini_api_key or settings.gemini_vertex_project),
                                 "anthropic": bool(settings.anthropic_api_key)}}

@@ -49,7 +49,9 @@ class Settings:
     agent_max_turns: int = 12
     agent_max_output_tokens: int = 8000
     agent_thinking: str = "low"       # Gemini thinking_level; Anthropic effort
-    agent_budget_usd: float = 0.0     # hard cap on estimated live LLM spend; 0 blocks live calls
+    agent_budget_usd: float = 0.0     # cap on calculated live LLM spend (list prices); 0 blocks live calls
+    agent_max_live_requests: int = 0  # hard cap on the total number of live model requests ever made
+    agent_thought_allowance: int = 8192   # thinking tokens assumed per request in the pre-call estimate
     gemini_api_key: str | None = field(default=None, repr=False)
     gemini_vertex_project: str | None = None
     gemini_vertex_location: str = "global"
@@ -95,6 +97,8 @@ class Settings:
             agent_max_output_tokens=int(g("STUDIO_AGENT_MAX_OUTPUT_TOKENS", "8000")),
             agent_thinking=g("STUDIO_AGENT_THINKING", "low"),
             agent_budget_usd=float(g("STUDIO_AGENT_BUDGET_USD", "0")),
+            agent_max_live_requests=int(g("STUDIO_AGENT_MAX_LIVE_REQUESTS", "0")),
+            agent_thought_allowance=int(g("STUDIO_AGENT_THOUGHT_ALLOWANCE", "8192")),
             gemini_api_key=g("GEMINI_API_KEY") or g("GOOGLE_API_KEY") or None,
             gemini_vertex_project=g("STUDIO_GEMINI_VERTEX_PROJECT") or None,
             gemini_vertex_location=g("STUDIO_GEMINI_VERTEX_LOCATION", "global"),

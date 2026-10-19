@@ -23,6 +23,7 @@ from studio.ops import ConflictError
 
 
 def runner(w: World, factory=None, **over) -> AgentRunner:
+    over.setdefault("agent_max_live_requests", 50)
     s = w.settings.__class__(**{**w.settings.__dict__, **over})
     return AgentRunner(s, w.ops, w.service, w.media, AgentStore(w.db), factory)
 
@@ -288,9 +289,9 @@ def test_worst_case_spend_cap_refuses_before_calling(world: World):
     shot = world.shot()
     mock = MockGeminiClient(gemini_script(shot["id"]))
     ag = runner(world, factory=lambda p, m: GeminiProvider(model=m, client=mock), agent_provider="gemini",
-                agent_budget_usd=0.01, agent_max_output_tokens=8000)          # 8k output x $3.75/M = $0.03 > cap
+                agent_budget_usd=0.01, agent_max_output_tokens=2048)   # (2,048 + 8,192 thought allowance) x $3.75/M > cap
     tid = ag.create_thread(shot["project_id"])["id"]
-    with pytest.raises(AgentBudgetError, match="could cost up to"):
+    with pytest.raises(AgentBudgetError, match="estimated at"):
         ag.send(tid, f"revise {shot['id']}")
     assert mock.calls == []
 
@@ -403,3 +404,77 @@ def test_first_frame_prompt_still_byte_identical_for_empty_new_fields(world: Wor
     shot = world.shot()
     p = compile_prompt(world.ops.get_project(shot["project_id"]), world.ops.get_shot_row(shot["id"]))
     assert "Sound:" not in p and ": very" not in p
+
+
+# -- hardening found before the first live run (2026-10-20) ---------------------------------------
+
+def test_real_gemini_client_has_retries_disabled_and_sends_once():
+    """Offline: a mock transport answers 503; the adapter's real SDK client must not retry."""
+    import httpx
+    from studio.agent.providers.gemini import GeminiProvider
+    from studio.agent.providers.base import ProviderError
+    hits = []
+    p = GeminiProvider(model="gemini-3.8-flash", api_key="dummy-offline")
+    p._client.interactions.sdk_configuration.client = httpx.Client(transport=httpx.MockTransport(
+        lambda r: hits.append(1) or httpx.Response(503, json={"error": {"code": 503, "message": "x", "status": "UNAVAILABLE"}})))
+    with pytest.raises(ProviderError, match="Gemini request failed"):
+        p.complete(system="s", history=p.user_items("hi"), tools=SPECS, max_output_tokens=10)
+    assert len(hits) == 1
+    assert p._meta is not p._client
+
+
+def test_interactions_compat_errors_become_notices_not_500(world: World):
+    import httpx
+    shot = world.shot()
+    p = GeminiProvider(model="gemini-3.8-flash", api_key="dummy-offline")
+    p._client.interactions.sdk_configuration.client = httpx.Client(transport=httpx.MockTransport(
+        lambda r: httpx.Response(400, json={"error": {"code": 400, "message": "bad schema", "status": "INVALID_ARGUMENT"}})))
+    p._verified = True
+    ag = runner(world, factory=lambda prov, m: p, agent_provider="gemini", agent_budget_usd=1.0)
+    tid = ag.create_thread(shot["project_id"])["id"]
+    assert ag.send(tid, "x").stop == "error"
+    assert any("bad schema" in m["content"]["text"] for m in ag.view(tid)["messages"] if m["kind"] == "notice")
+
+
+def test_live_request_cap_is_global_and_stops_mid_thread(world: World):
+    shot = world.shot()
+    mock = MockGeminiClient(gemini_script(shot["id"]))
+    ag = runner(world, factory=lambda p, m: GeminiProvider(model=m, client=mock), agent_provider="gemini",
+                agent_budget_usd=1.0, agent_max_live_requests=2)
+    tid = ag.create_thread(shot["project_id"])["id"]
+    rep = ag.send(tid, f"revise {shot['id']}")
+    assert rep.stop == "budget" and len(mock.calls) == 2
+    with pytest.raises(AgentBudgetError, match="request cap"):
+        ag.send(tid, "again")
+
+
+def test_cost_above_estimate_stops_and_leaves_history_well_formed(world: World):
+    shot = world.shot()
+    huge = gemini_script(shot["id"])
+    huge[0]["usage"] = {"total_input_tokens": 2_000_000, "total_output_tokens": 10, "total_thought_tokens": 0}
+    mock = MockGeminiClient(huge)
+    ag = runner(world, factory=lambda p, m: GeminiProvider(model=m, client=mock), agent_provider="gemini",
+                agent_budget_usd=5.0)
+    tid = ag.create_thread(shot["project_id"])["id"]
+    assert ag.send(tid, "x").stop == "estimate_exceeded"
+    items = AgentStore(world.db).provider_items(tid)
+    calls = {i["id"] for i in items if i.get("type") == "function_call"}
+    results = {i["call_id"] for i in items if i.get("type") == "function_result"}
+    assert calls == results and AgentStore(world.db).calls(tid) == []     # nothing executed
+    u = AgentStore(world.db).usage(tid)[0]
+    assert u["pre_estimate_usd"] is not None and u["est_usd"] > u["pre_estimate_usd"]
+
+
+def test_gemini_usage_counts_tool_use_tokens_and_keeps_raw():
+    """Regression for the first live run: tool-result tokens were reported outside total_input_tokens."""
+    from studio.agent.providers.gemini import gemini_usage
+    u = GI.Interaction.model_validate({"id": "i", "status": "completed", "steps": [], "usage": {
+        "total_input_tokens": 1324, "total_tool_use_tokens": 1590, "total_output_tokens": 73,
+        "total_thought_tokens": 40, "total_tokens": 3027,
+        "input_tokens_by_modality": [{"modality": "text", "tokens": 1200}, {"modality": "image", "tokens": 124}]}}).usage
+    g = gemini_usage(u)
+    assert g.input_tokens == 1324 + 1590 and g.output_tokens == 73 and g.thought_tokens == 40
+    assert g.billable_output == 113 and g.raw["input_tokens_by_modality"][1]["modality"] == "image"
+    u2 = GI.Interaction.model_validate({"id": "i", "status": "completed", "steps": [], "usage": {
+        "total_input_tokens": 100, "total_output_tokens": 10, "total_tokens": 600}}).usage
+    assert gemini_usage(u2).input_tokens == 590              # unexplained internal tokens counted as input

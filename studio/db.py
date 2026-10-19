@@ -221,7 +221,10 @@ CREATE TABLE IF NOT EXISTS agent_usage (
   model TEXT NOT NULL,
   input_tokens INTEGER NOT NULL,
   output_tokens INTEGER NOT NULL,   -- includes thinking tokens where billed as output
-  est_usd REAL NOT NULL,
+  thought_tokens INTEGER NOT NULL DEFAULT 0,   -- the thinking part of output_tokens (reported separately by Gemini)
+  pre_estimate_usd REAL,            -- pre-call estimate (NOT a guaranteed bound)
+  raw_usage TEXT,                   -- provider usage object as reported (JSON)
+  est_usd REAL NOT NULL,            -- calculated from reported usage at list price; not a billing record
   live INTEGER NOT NULL,
   at TEXT NOT NULL
 );
@@ -283,6 +286,8 @@ class Database:
                   ("audio", "TEXT NOT NULL DEFAULT ''"),
                   ("locked", "INTEGER NOT NULL DEFAULT 0")],
         "proposals": [("context", "TEXT"), ("context_hash", "TEXT"), ("stale_reason", "TEXT")],
+        "agent_usage": [("thought_tokens", "INTEGER NOT NULL DEFAULT 0"), ("pre_estimate_usd", "REAL"),
+                        ("raw_usage", "TEXT")],
     }
 
     def _migrate(self, conn: sqlite3.Connection) -> None:

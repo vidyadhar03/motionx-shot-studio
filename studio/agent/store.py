@@ -80,11 +80,19 @@ class AgentStore:
 
     # -- usage / spend ----------------------------------------------------------------------------
     def record_usage(self, tid: str, provider: str, model: str, input_tokens: int, output_tokens: int,
-                     est_usd: float, live: bool) -> None:
+                     est_usd: float, live: bool, thought_tokens: int = 0, pre_estimate_usd: float | None = None,
+                     raw_usage: dict | None = None) -> None:
         with self.db.tx() as c:
-            c.execute("INSERT INTO agent_usage(thread_id,provider,model,input_tokens,output_tokens,est_usd,live,at) "
-                      "VALUES (?,?,?,?,?,?,?,?)", (tid, provider, model, input_tokens, output_tokens, est_usd,
-                                                   int(live), now()))
+            c.execute("INSERT INTO agent_usage(thread_id,provider,model,input_tokens,output_tokens,thought_tokens,"
+                      "pre_estimate_usd,raw_usage,est_usd,live,at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                      (tid, provider, model, input_tokens, output_tokens, thought_tokens, pre_estimate_usd,
+                       dumps(raw_usage) if raw_usage else None, est_usd, int(live), now()))
+
+    def live_requests(self) -> int:
+        return self.db.one("SELECT COUNT(*) AS n FROM agent_usage WHERE live=1")["n"]
+
+    def usage(self, tid: str) -> list[dict]:
+        return self.db.all("SELECT * FROM agent_usage WHERE thread_id=? ORDER BY id", tid)
 
     def live_spend_usd(self) -> float:
         return round(self.db.one("SELECT COALESCE(SUM(est_usd),0) AS s FROM agent_usage WHERE live=1")["s"], 6)

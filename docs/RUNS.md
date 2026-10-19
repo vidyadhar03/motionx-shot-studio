@@ -50,3 +50,78 @@ The app enforces this through `.env`: `STUDIO_MAX_PAID_ATTEMPTS=1` and `STUDIO_B
 | 2026-10-20 | Key scan of the DB, media, proxy state, ComfyUI user/output dirs and logs | Key not present |
 | 2026-10-20 | `comfy_check.py graphs` (offline, M2) | first_frame, reference ×1, ×3, ×9: all VALID under ComfyUI 0.42.1 `validate_prompt` |
 | 2026-10-20 | Paid approval on the real DB after the M2 migration | HTTP 402 `paid attempt limit reached (1/1)`; run 1 snapshot and video hashes unchanged |
+
+## Live LLM runs (agent; separate from Comfy credits)
+
+| Authorisation | Limits | Status |
+|---|---|---|
+| 2026-10-20, one bounded test | Gemini `gemini-3.8-flash` only, ≤ 8 model requests, 2,048 output tokens per request, thinking `low`, ≤ $0.10, no retries, no repeat sessions | **Used: 5 requests.** Live calls are disabled again (`STUDIO_AGENT_MAX_LIVE_REQUESTS=0`, budget 0) pending review |
+
+### Live run 1: 2026-10-20 ~03:18–03:19 local, isolated project `data-live1` (synthetic assets, fake video adapter)
+
+**Setup.**
+- Project "Rain Walk (Live agent test (synthetic))" with @oli v1 (red coat), then v2 (yellow coat), and @street v1.
+- One reference shot pinned to @oli v1, take 1 (fake video) with three notes: "Too fast. Push in slower and end on her eyes"; "Add rain sound and distant traffic, no music"; "Coat should match the costume update".
+- One decision: "No score anywhere in the film; diegetic sound only."
+- The request was typed into the agent UI exactly as given and sent once.
+- *Operator error before the run:* a stray click on a stale UI reference hit "Propose generation" and created a pending **user** proposal. Nothing was approved, no model call was made, and nothing was spent. I rejected it before the run (`prp_128a9d87…`, status `rejected`).
+
+**Pre-run checks.**
+- `models.get("gemini-3.8-flash")` (metadata, no tokens): available, 1,048,576 in / 65,536 out, `thinking: True`. `supported_actions` lists generateContent / countTokens / createCachedContent / batchGenerateContent; it doesn't enumerate the Interactions API, which the official function-calling docs use with this model.
+- Interactions retries forced off (strategy `none`), proven offline with a mock 503: 1 attempt instead of the default 4.
+
+**What happened (5 model requests, 8 tool calls, all `done`; stop = model finished).**
+
+| Request | Tool calls chosen by Gemini |
+|---|---|
+| 1 | `read /skills/shot-direction`, `read /shots/{id}`, `list /decisions` |
+| 2 | `read /shots/{id}/takes/1` (feedback), `read /assets/oli`, `read /assets/oli/v2` (image attached) |
+| 3 | `write /shots/{id}` (expected_revision 1) |
+| 4 | `propose_generation` (parent take 1) |
+| 5 | final message, no tools |
+
+**Context and skill actually read.**
+- Read: the skill, the shot, decisions, take 1 feedback, @oli (all versions) and the @oli v2 image.
+- Not read through tools: `/` (brief and direction came only from the system-prompt header), @street, the @oli v1 image.
+
+**Shot changes (revision 1 → 2, author agent).**
+- `camera_detail`: "Slow push in, ending tightly on her eyes."
+- `audio`: "Rain falling on cobblestones and distant muffled traffic; no music."
+- `refs`: @oli v1 → **v2**, @street v1 unchanged.
+
+**Compiled proposal** (`prp_bdb3dc79…`, pending, `created_by=agent`, ~135.78 credits on the real route, not approved, no take created):
+
+> Oli hurries home, soaked and alone. She crosses the street in the rain, glancing back once. Wide shot showing the full space and the subject's whole body. Slow, steady push-in toward the subject: Slow push in, ending tightly on her eyes. Low-key night lighting, deep shadows, pools of light. Style: melancholic noir; sodium orange, ink blue. Image 1 is @oli (character: woman in a yellow raincoat, short dark hair). Image 2 is @street (location: wet cobbled street under sodium lamps). Sound: Rain falling on cobblestones and distant muffled traffic; no music. Keep each referenced character, location and prop consistent with its image. One continuous shot, no cuts, no on-screen text.
+
+**Review of the result.**
+- All three notes were addressed, and the sound respects the decision. There were no edits outside the notes.
+- Weaknesses:
+  1. `camera_detail` repeats the preset ("Slow, steady push-in…: Slow push in…"). Redundant, not contradictory.
+  2. Framing stays `wide` ("whole body") while the move now ends "tightly on her eyes". That's a tension our checks don't detect (framing vs camera end point).
+  3. "Too fast" was answered with wording only. Pushing from a wide to the eyes in an unchanged 5 s may still read fast; it didn't consider `duration_s`.
+
+**Integration.**
+- Live API: worked.
+- Tool calls and results: worked.
+- Thought steps (5, each with a 144-char signature) were resent unchanged and accepted.
+- The image part (`image/png`) in a `function_result` was accepted. Whether the model *used* it can't be shown: v2's text description also says "yellow".
+
+**Usage and cost (calculated at list price, not a billing charge).**
+
+| Request | Reported input | Reported output | Reported thought | Pre-call estimate | Calculated |
+|---|---|---|---|---|---|
+| 1 | 1,239 | 67 | 0 | $0.02401 | $0.001181 |
+| 2 | 1,324 | 73 | 0 | $0.02549 | $0.001267 |
+| 3 | 2,495 | 132 | 0 | $0.02734 | $0.002366 |
+| 4 | 2,633 | 94 | 0 | $0.02761 | $0.002327 |
+| 5 | 2,736 | 256 | 0 | $0.02799 | $0.003012 |
+| **Total** | 10,427 | 622 | 0 | – | **$0.010153** |
+
+**Caveat, found after the run.**
+- Reported input grew far less than the tool-result text added to the history (request 2: +85 tokens after ~1,590 tokens of results). Tool results were probably counted in `total_tool_use_tokens`, which this version didn't record; nor did it record `total_tokens` or the per-modality breakdown.
+- If that tool-result content (~8,400 tokens across requests 2–5, by character estimate) plus up to ~1,100 tokens per image resend were billable input, the cost would be about **$0.019**.
+- Thought tokens were reported as 0 even though thought steps were returned.
+- The actual charge must be confirmed in the Google AI Studio or Cloud billing console. Either figure is well under the $0.10 cap.
+- Fixed offline: raw usage is now stored, and billable input = max(input + tool_use, total − output − thought).
+
+**Reload.** After a page reload and a server restart: 5 requests, 23 provider items, 8 tool calls, 2 shot revisions, 3 proposals, 1 take, $0.010153, all identical. A further send on the thread was refused before any network call: `live calls are disabled: STUDIO_AGENT_MAX_LIVE_REQUESTS is 0`.

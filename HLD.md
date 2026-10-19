@@ -225,7 +225,16 @@ With `camera_detail` and `audio` empty, the output is byte-identical to M1/M2, s
 
 - **Configuration:** `STUDIO_AGENT_PROVIDER` (`scripted` | `gemini` | `anthropic`), `STUDIO_AGENT_MODEL`, `STUDIO_AGENT_MAX_TURNS` (12), `STUDIO_AGENT_MAX_OUTPUT_TOKENS` (8,000), `STUDIO_AGENT_THINKING` (Gemini `thinking_level`, default `low`).
 - **Spend cap:** `STUDIO_AGENT_BUDGET_USD`, an **LLM** spend cap independent of Comfy credits. Default **0**, which blocks all live calls.
-- **Before every live call**, the loop checks `spent + worst_case(call) ≤ cap`, where worst case = estimated input tokens × input price + `max_output_tokens` × output price, using a dated price table in `studio/agent/pricing.py`. After the call, actual usage is recorded: Gemini `total_input_tokens` / `total_output_tokens` / `total_thought_tokens`, with thoughts billed as output; Anthropic `input_tokens` / `output_tokens`. Gemini's free tier isn't assumed.
+- **Before every live call**, the loop checks a **pre-call estimate**, not a guaranteed bound: `spent + estimate ≤ cap`, plus a hard cap on the total number of live requests (`STUDIO_AGENT_MAX_LIVE_REQUESTS`).
+  - Estimate = approximate input tokens (characters / 3.5 + 1,600 per image) × input price + (`max_output_tokens` + an assumed thinking allowance `STUDIO_AGENT_THOUGHT_ALLOWANCE`) × output price, from the dated table in `studio/agent/pricing.py`.
+  - It isn't a bound because the input count is approximate, and the docs don't say whether `max_output_tokens` also caps thinking.
+  - If a request's calculated cost exceeds its estimate, the loop stops.
+- **After the call**, cost is calculated from reported usage at list price.
+  - Gemini: billable input = max(`total_input_tokens` + `total_tool_use_tokens`, `total_tokens` − output − thought) × input price, plus (`total_output_tokens` + `total_thought_tokens`) × output price.
+  - Why: image tokens are inside input; thoughts are reported separately from output; and the first live run showed function-result content counted outside `total_input_tokens`. The raw usage object is stored for audit, and cached input is charged at the full rate (conservative).
+  - Anthropic: `input_tokens` + cache tokens, and `output_tokens`.
+  - This is a calculation, not a billing record. Gemini's free tier isn't assumed.
+- **No automatic network retries.** The Gemini Interactions client retries 408/409/429/5xx up to 3 times by default, and `retry_options.attempts=0` still leaves one retry (verified offline). The adapter therefore sets that client's retry strategy to `none` and refuses to call if it isn't in effect.
 - **Model verification:** before the first live call per process, the provider verifies the model ID (Gemini `client.models.get`, Anthropic `client.models.retrieve`) and refuses on failure. Not run in M3, since no live calls are authorised.
 - **Credentials:** `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` stay in env only. They never appear in threads, tool records, snapshots or logs; a test scans the data dir.
 

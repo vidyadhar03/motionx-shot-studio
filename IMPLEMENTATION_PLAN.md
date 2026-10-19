@@ -180,8 +180,18 @@ All of these are **fake-adapter or offline results** unless marked otherwise. Cr
 | 9 | Live gates: LLM budget 0 blocks before any call; worst-case estimate refused before calling; unknown model price refused; missing credentials and unknown provider give clear errors; no fallback | ✅ tests |
 | 10 | Real paid take and spend lock preserved after the M3 migration | ✅ snapshot `d62f9bb4…` and video `e5a09cfd…` unchanged; paid approval → 402 |
 
-**Not verified against live models (needs an approved LLM budget and key):**
-- That Gemini `gemini-3.8-flash` accepts our requests end to end: tool schemas, stateless history with thought signatures, image parts in `function_result`, `thinking_level`.
+**Live run 1 (2026-10-20, Gemini `gemini-3.8-flash`, details in `docs/RUNS.md`):** one bounded request through the UI. Gemini read the skill, shot, decisions, feedback and @oli versions (one image attached); wrote `camera_detail`, `audio` and @oli v1→v2; and created **one** pending proposal in 5 requests (calculated $0.0102 at list price; up to about $0.019 if tool-result tokens are billed separately; billing not confirmed). Reload and restart re-ran nothing. Live calls are disabled again.
+
+Fixed offline before or after the run:
+- Interactions errors weren't caught (a different exception family).
+- The SDK's default automatic retries (×3) are now forced off and asserted.
+- A hard live-request cap was added, and the stop rule now triggers when a request costs more than its estimate.
+- Tool-use tokens and raw usage are now recorded.
+
+**Still not verified live:**
+- That the model actually *uses* image inputs (accepted by the API; effect not shown). Per-modality token counts are recorded from now on.
+- Agent quality beyond one request: framing vs camera end-point tension, redundant `camera_detail`, duration not considered for "too fast".
+- The actual billed amount (billing console) and whether `total_tool_use_tokens` are charged.
 - Whether the live model uses the tools sensibly: reads before writing, follows the skill's field rules, avoids contradictions, proposes once, doesn't loop.
 - The quality of its direction compared with the scripted rules.
 - Model-ID verification calls (`models.get` / `models.retrieve`).

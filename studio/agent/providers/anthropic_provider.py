@@ -90,7 +90,7 @@ class AnthropicProvider:
         u = resp.usage
         usage = Usage(input_tokens=(u.input_tokens or 0) + (getattr(u, "cache_read_input_tokens", 0) or 0)
                       + (getattr(u, "cache_creation_input_tokens", 0) or 0),
-                      output_tokens=u.output_tokens or 0)
+                      output_tokens=u.output_tokens or 0, raw=u.model_dump(mode="json", exclude_none=True))
         # Tools run only on a genuine tool_use stop; a refusal or truncated turn executes nothing.
         return Turn(items=[{"role": "assistant", "content": blocks}], text=text,
                     tool_calls=calls if stop == "tool_use" else [], usage=usage, stop=stop, model=self.model)

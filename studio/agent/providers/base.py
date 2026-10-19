@@ -49,9 +49,10 @@ class ToolOutcome:
 
 @dataclass
 class Usage:
-    input_tokens: int = 0
+    input_tokens: int = 0               # billable input used for the cost calculation (see adapter)
     output_tokens: int = 0              # visible output
     thought_tokens: int = 0             # billed as output by both providers
+    raw: dict = field(default_factory=dict)   # the provider's usage object as reported, for audit
 
     @property
     def billable_output(self) -> int:

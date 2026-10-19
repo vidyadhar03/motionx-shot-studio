@@ -23,7 +23,7 @@ log = logging.getLogger("studio.agent")
 
 
 class AgentBudgetError(RuntimeError):
-    """A live LLM call was refused by the LLM spend cap (independent of Comfy credits)."""
+    """A live LLM call was refused by the LLM spend cap or request cap (independent of Comfy credits)."""
 
 
 SYSTEM_RULES = """You are the MotionX Shot Studio directing assistant, working inside ONE film project.
@@ -96,8 +96,15 @@ class AgentRunner:
         history = self.store.provider_items(thread_id)
         stop = "end"
         for turn in range(1, self.settings.agent_max_turns + 1):
+            pre = None
             if provider.live:
-                self._check_budget(provider, system, history)
+                try:
+                    pre = self._check_budget(provider, system, history)
+                except AgentBudgetError as e:          # mid-thread: stop cleanly and say why
+                    if turn == 1:
+                        raise
+                    self.store.append(thread_id, "notice", {"level": "warn", "text": f"stopped before request {turn}: {e}"})
+                    return TurnReport(turn - 1, "budget", self.store.live_spend_usd())
             try:
                 t = provider.complete(system=system, history=history, tools=SPECS,
                                       max_output_tokens=self.settings.agent_max_output_tokens)
@@ -106,7 +113,18 @@ class AgentRunner:
                 return TurnReport(turn, "error", self.store.live_spend_usd())
             est = pricing.usd(provider.model, t.usage.input_tokens, t.usage.billable_output) if provider.live else 0.0
             self.store.record_usage(thread_id, provider.name, provider.model, t.usage.input_tokens,
-                                    t.usage.billable_output, est, provider.live)
+                                    t.usage.billable_output, est, provider.live, thought_tokens=t.usage.thought_tokens,
+                                    pre_estimate_usd=pre, raw_usage=t.usage.raw)
+            if pre is not None and est > pre:
+                # The pre-call figure is an estimate, not a bound; if reality exceeded it, stop and report.
+                self.store.append_items(thread_id, t.items)
+                if t.tool_calls:                       # keep history well-formed: every call gets a result
+                    skipped = [ToolOutcome(c.id, c.name, {"error": "NotExecuted", "message": "stopped: spend estimate "
+                                           "exceeded"}, is_error=True) for c in t.tool_calls]
+                    self.store.append_items(thread_id, provider.tool_result_items(skipped))
+                self.store.append(thread_id, "notice", {"level": "warn", "text":
+                                  f"request {turn} cost ${est:.5f}, above its ${pre:.5f} estimate; stopped"})
+                return TurnReport(turn, "estimate_exceeded", self.store.live_spend_usd())
             self.store.append_items(thread_id, t.items)
             history += t.items
             if t.text:
@@ -144,6 +162,8 @@ class AgentRunner:
 
     # -- live gates -----------------------------------------------------------------------------
     def _check_live_allowed(self, provider: Provider) -> None:
+        if self.settings.agent_max_live_requests <= 0:
+            raise AgentBudgetError("live calls are disabled: STUDIO_AGENT_MAX_LIVE_REQUESTS is 0")
         if self.settings.agent_budget_usd <= 0:
             raise AgentBudgetError(f"live {provider.name} calls are disabled: STUDIO_AGENT_BUDGET_USD is 0 "
                                    "(the LLM spend cap is separate from Comfy credits)")
@@ -152,16 +172,23 @@ class AgentRunner:
         except pricing.UnknownPrice as e:
             raise AgentBudgetError(str(e)) from None
 
-    def _check_budget(self, provider: Provider, system: str, history: list[dict]) -> None:
+    def _check_budget(self, provider: Provider, system: str, history: list[dict]) -> float:
+        """Pre-call ESTIMATE, not a guaranteed bound: input is approximated from characters (+ a per-image
+        allowance) and thinking is assumed to stay within agent_thought_allowance, which the provider does not
+        guarantee. Returns the estimate; raises if spent + estimate would exceed the cap or the request cap."""
+        if self.store.live_requests() >= self.settings.agent_max_live_requests:
+            raise AgentBudgetError(f"live request cap reached ({self.settings.agent_max_live_requests})")
         est_in = provider.estimate_input_tokens(system, history, SPECS)
-        worst = pricing.usd(provider.model, est_in, self.settings.agent_max_output_tokens)
+        est = pricing.usd(provider.model, est_in,
+                          self.settings.agent_max_output_tokens + self.settings.agent_thought_allowance)
         spent = self.store.live_spend_usd()
-        if spent + worst > self.settings.agent_budget_usd:
-            raise AgentBudgetError(f"next {provider.name} call could cost up to ${worst:.4f}; ${spent:.4f} of the "
+        if spent + est > self.settings.agent_budget_usd:
+            raise AgentBudgetError(f"next {provider.name} request is estimated at ${est:.4f}; ${spent:.4f} of the "
                                    f"${self.settings.agent_budget_usd:.2f} LLM cap is already used")
+        return est
 
     # -- reading a thread (never executes anything) --------------------------------------------
     def view(self, thread_id: str) -> dict:
         thread = self.store.thread(thread_id)
         return {"thread": thread, "messages": self.store.messages(thread_id), "tool_calls": self.store.calls(thread_id),
-                "live_spend_usd": self.store.live_spend_usd()}
+                "usage": self.store.usage(thread_id), "live_spend_usd": self.store.live_spend_usd()}

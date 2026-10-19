@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from ..execution.base import UnsupportedRequest
 from ..generation import GenerationService
+from ..compiler import PRESETS
 from ..media import MediaStore
 from ..ops import AGENT_SHOT_FIELDS, ConflictError, NotFoundError, Ops
 from .providers.base import ToolCall, ToolOutcome, ToolSpec
@@ -25,6 +26,26 @@ READ_PATHS = ("/, /decisions, /assets/{handle}, /assets/{handle}/v{n}, /scenes/{
               "/shots/{id}/start_frame, /shots/{id}/takes/{n}, /shots/{id}/proposals/{proposal_id}, /skills/{name}")
 WRITE_PATHS = "/shots/{id} (update a draft shot; needs expected_revision), /shots (create), /scenes (create)"
 
+_STR = {"type": "string"}
+PATCH_SCHEMA = {
+    "type": "object",
+    "description": "Only the fields to change. For /scenes give {name}.",
+    "properties": {
+        "title": _STR, "intention": _STR, "action": {"type": "string", "description": "What we see; timed beats like '0-2s: ...' must fit duration_s."},
+        "framing": {"type": "string", "enum": list(PRESETS["framing"])},
+        "camera_move": {"type": "string", "enum": list(PRESETS["camera_move"])},
+        "camera_detail": {"type": "string", "description": "How the chosen camera_move behaves (pace, end point). Must not name a different move."},
+        "lens_look": {"type": "string", "enum": list(PRESETS["lens_look"])},
+        "lighting": {"type": "string", "enum": list(PRESETS["lighting"])},
+        "audio": {"type": "string", "description": "Sound direction."},
+        "duration_s": {"type": "integer", "minimum": 4, "maximum": 15},
+        "mode": {"type": "string", "enum": ["first_frame", "reference"]},
+        "aspect_ratio": _STR, "scene_id": _STR, "name": _STR,
+        "refs": {"type": "array", "description": "Ordered references (Image 1..N), pinned to asset versions.",
+                 "items": {"type": "object", "properties": {"asset_version_id": _STR}, "required": ["asset_version_id"]}},
+    },
+}
+
 SPECS = [
     ToolSpec("list", f"List children of a project path as short summaries. Paths: {LIST_PATHS}.",
              {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}),
@@ -34,7 +55,7 @@ SPECS = [
              "may set: " + ", ".join(AGENT_SHOT_FIELDS) + ". refs is a list of {asset_version_id}.",
              {"type": "object", "properties": {
                  "path": {"type": "string"},
-                 "patch": {"type": "object"},
+                 "patch": PATCH_SCHEMA,
                  "expected_revision": {"type": "integer", "description": "Required when updating a shot."}},
               "required": ["path", "patch"]}),
     ToolSpec("propose_generation", "Create a PENDING generation proposal for a shot. A person must approve it; "
