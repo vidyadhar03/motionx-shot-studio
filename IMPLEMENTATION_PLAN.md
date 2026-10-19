@@ -114,7 +114,7 @@ All of these are **fake-adapter or offline results** unless marked otherwise. No
 | 8 | Offline test suite passes | ✅ **25 passed** (`.venv/bin/python -m pytest -q`) |
 | 9 | No secret in the DB, media, logs or snapshots | ✅ `test_partner_key_never_reaches_database_or_snapshot` scans every file in the data dir |
 | 10 | Paid-mode guards: no key → 402; budget and attempt caps → 402; balance below estimate → fails before submitting; definite rejection releases the reservation | ✅ tests plus an app check in `comfy_local` mode (402, 0 takes) |
-| 11 | **Real** hosted H3 run with the observed charge recorded | ⏳ **Blocked: no `COMFY_API_KEY` on this machine.** The zero-cost probe through the real stack passes |
+| 11 | **Real** hosted H3 run with the observed charge recorded | ⏳ **Blocked: zero balance.** The key is configured and valid (2026-10-20), but the balance is 0 credits. The app's pre-submit balance guard failed the take with nothing sent (`docs/RUNS.md`). One take needs ≥136 credits; the two-take demo needs ≥272 (≈ $1.29) |
 
 ## 6. Main risks
 
