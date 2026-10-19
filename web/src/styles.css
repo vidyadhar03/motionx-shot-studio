@@ -135,3 +135,5 @@ dd.err { color: var(--bad); }
   .main { padding: 14px 16px; }
   .take-grid { grid-template-columns: 1fr; }
 }
+.ghost-link { color: var(--muted); font-size: 12px; text-decoration: none; border: 1px solid var(--line); padding: 5px 9px; border-radius: 6px; }
+.ghost-link:hover { color: var(--text); }

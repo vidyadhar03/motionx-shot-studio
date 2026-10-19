@@ -28,7 +28,7 @@ export type Take = {
 };
 
 export type Status = {
-  adapter: string; is_paid: boolean; versions: Record<string, string>; feedback_reasons: string[];
+  adapter: string; is_paid: boolean; versions: Record<string, string>; feedback_reasons: string[]; comfyui_port: number | null;
   budget: { budget_credits: number; committed_credits: number; remaining_credits: number; attempts: number;
             max_attempts: number; key_configured: boolean; is_paid: boolean };
 };

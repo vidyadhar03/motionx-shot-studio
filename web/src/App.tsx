@@ -70,6 +70,12 @@ export default function App() {
         </select>
         <button className="ghost" onClick={newProject}>New project</button>
         <div className="spacer" />
+        {status?.is_paid && status.comfyui_port && (
+          // Same host as this page => Sec-Fetch-Site "same-site". ComfyUI answers a bare 403 to
+          // "cross-site" navigations (its CSRF guard), e.g. a link clicked in another app or site.
+          <a className="ghost-link" href={`${location.protocol}//${location.hostname}:${status.comfyui_port}/`}
+             target="_blank" rel="noreferrer">Open ComfyUI</a>
+        )}
         {status && <AdapterBadge status={status} balance={balance} />}
       </header>
 

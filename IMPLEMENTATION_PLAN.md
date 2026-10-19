@@ -111,10 +111,10 @@ All of these are **fake-adapter or offline results** unless marked otherwise. No
 | 5 | Successful take stores the MP4 with its sha256 and an immutable snapshot (shot fields, frame sha, prompt, workflow and manifest sha, node bindings, seed, versions) | ✅ The DB trigger refuses snapshot updates (`test_snapshot_and_media_are_immutable…`) |
 | 6 | Feedback on take 1, then revise, gives take 2 with `parent_take_id`; both are playable and take 1's snapshot bytes are unchanged | ✅ test plus browser run: take 1 at rev 2/static, take 2 at rev 3/push-in, side-by-side compare |
 | 7 | Recovery: crash while `submitted` resumes the same job; crash mid-submit becomes `submission_unknown` with no resubmit; download failure is resumable; ambiguous submit plus a human attach works | ✅ tests. Also a live kill/restart of the running app: same job id, backend submission count unchanged (3 → 3) |
-| 8 | Offline test suite passes | ✅ **25 passed** (`.venv/bin/python -m pytest -q`) |
+| 8 | Offline test suite passes | ✅ **27 passed** (`.venv/bin/python -m pytest -q`) |
 | 9 | No secret in the DB, media, logs or snapshots | ✅ `test_partner_key_never_reaches_database_or_snapshot` scans every file in the data dir |
 | 10 | Paid-mode guards: no key → 402; budget and attempt caps → 402; balance below estimate → fails before submitting; definite rejection releases the reservation | ✅ tests plus an app check in `comfy_local` mode (402, 0 takes) |
-| 11 | **Real** hosted H3 run with the observed charge recorded | ⏳ **Blocked: zero balance.** The key is configured and valid (2026-10-20), but the balance is 0 credits. The app's pre-submit balance guard failed the take with nothing sent (`docs/RUNS.md`). One take needs ≥136 credits; the two-take demo needs ≥272 (≈ $1.29) |
+| 11 | **Real** hosted H3 run with the observed charge recorded | ✅ **One paid run, 2026-10-20:** 5 s 768P H3, succeeded in 2 min 42 s. Observed charge **135.78 credits ($0.6435)**, equal to the estimate, and it posted after completion. Output verified (`docs/RUNS.md`). A second take wasn't run, as instructed |
 
 ## 6. Main risks
 
@@ -122,7 +122,7 @@ All of these are **fake-adapter or offline results** unless marked otherwise. No
 |---|---|
 | **Schedule** (10 days) | M1 is done on fake. M2 and M3 are scoped down; the agent can shrink to `read` + `propose_generation` |
 | Restarting ComfyUI mid-generation loses the job (in-memory history) while the hosted task is still billed | The take is marked `lost`. The UI and README say not to restart ComfyUI while a take runs. Concurrency is 1 |
-| Partner cost posts late, so the balance delta under-reads | Reservations count the estimate until an observed value exists. `reconcile` re-reads later. Spending is sequential |
+| Partner cost posts late, so the balance delta under-reads (**seen on the first real run**) | Fixed: a delta ≤ 0 is never recorded. The worker re-reads 4× at 20 s intervals, then marks the take `charge_pending` and keeps the reservation counting. `reconcile` re-reads later. Spending is sequential |
 | comfy-api-proxy 0.1.x / SDK 0.5 are young | Pinned. The adapter is small and isolated. The probe script catches drift |
 | H3 doesn't follow camera/lens/lighting phrases, or reference identity drifts | Controls are labelled as prompt descriptors. The resolved prompt is visible. The revision loop is the remedy |
 | Start frame plus references can't be combined in one H3 call | Documented two-step workaround (HLD §7.2). A composition stage is a stretch goal |

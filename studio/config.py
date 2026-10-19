@@ -40,6 +40,8 @@ class Settings:
     poll_deadline_s: float = 1800.0   # local patience per worker run; NOT a provider failure
     sweep_interval_s: float = 30.0
     lease_s: float = 120.0
+    charge_settle_s: float = 20.0     # Partner Node cost can post after the job ends: re-read balance
+    charge_settle_attempts: int = 4   # ... this many times before leaving the charge "pending"
     fake_job_seconds: float = 3.0     # fake adapter: queued->running->succeeded duration
     fake_render: str = "ffmpeg"       # fake adapter: "ffmpeg" | "copy"
 
@@ -73,6 +75,8 @@ class Settings:
             poll_interval_s=float(g("STUDIO_POLL_INTERVAL_S", "5")),
             poll_deadline_s=float(g("STUDIO_POLL_DEADLINE_S", "1800")),
             sweep_interval_s=float(g("STUDIO_SWEEP_INTERVAL_S", "30")),
+            charge_settle_s=float(g("STUDIO_CHARGE_SETTLE_S", "20")),
+            charge_settle_attempts=int(g("STUDIO_CHARGE_SETTLE_ATTEMPTS", "4")),
             fake_job_seconds=float(g("STUDIO_FAKE_JOB_SECONDS", "3")),
             fake_render=g("STUDIO_FAKE_RENDER", "ffmpeg"),
         )

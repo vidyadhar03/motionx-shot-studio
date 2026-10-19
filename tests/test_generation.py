@@ -229,6 +229,24 @@ def test_observed_charge_from_balance_delta(tmp_path):
     assert w.service.budget().committed_credits == 136.0
 
 
+def test_late_posted_charge_is_retried_not_recorded_as_zero(tmp_path):
+    # Real behaviour seen 2026-10-20: balance unchanged at completion, dropped by the estimate later.
+    w = World(tmp_path, paid=True, COMFY_API_KEY="comfyui-test", balance=[1055.0, 1055.0, 1055.0, 919.22])
+    t = approve_and_run(w, w.shot()["id"])
+    assert t["observed_credits"] == 135.78 and t["balance_after_credits"] == 919.22
+    assert w.service.budget().committed_credits == 135.78
+
+
+def test_unposted_charge_stays_pending_and_keeps_reservation(tmp_path):
+    w = World(tmp_path, paid=True, COMFY_API_KEY="comfyui-test", balance=1055.0)
+    t = approve_and_run(w, w.shot()["id"])
+    assert t["state"] == "succeeded" and t["observed_credits"] is None
+    assert w.service.budget().committed_credits == pytest.approx(135.78, abs=0.05)
+    assert any(e["state"] == "charge_pending" for e in t["events"])
+    w._balance = 919.22
+    assert w.service.reconcile_charge(t["id"])["observed_credits"] == 135.78
+
+
 def test_insufficient_balance_fails_before_submitting(tmp_path):
     w = World(tmp_path, paid=True, COMFY_API_KEY="comfyui-test", balance=50.0)
     t = approve_and_run(w, w.shot()["id"])

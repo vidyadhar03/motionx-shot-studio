@@ -5,6 +5,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
@@ -115,7 +116,8 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     def status() -> dict:
         b = service.budget().as_dict()
         return {"adapter": adapter.name, "is_paid": adapter.is_paid, "budget": b,
-                "versions": adapter.versions(), "feedback_reasons": FEEDBACK_REASONS}
+                "versions": adapter.versions(), "feedback_reasons": FEEDBACK_REASONS,
+                "comfyui_port": urlsplit(settings.comfyui_url).port}
 
     @app.get("/api/balance")
     def balance() -> dict:

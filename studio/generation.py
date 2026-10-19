@@ -401,24 +401,41 @@ class GenerationService:
                   finished_at=now())
         self._observe_charge(tid)
 
-    def _observe_charge(self, tid: str) -> None:
+    def _observe_charge(self, tid: str, *, attempts: int | None = None) -> None:
+        """Observed charge = balance before submit - balance now. Comfy may post a Partner Node's cost
+        after the job finishes (seen on the first real run: the balance was unchanged at completion and
+        dropped by the exact estimate shortly after). A delta <= 0 therefore means "not posted yet":
+        we re-read a few times and otherwise leave it pending, so the reserved estimate keeps counting
+        against the budget. A zero is never recorded as an observed charge."""
         if not self.adapter.is_paid:
             return
-        t = self.db.one("SELECT balance_before_credits FROM takes WHERE id=?", tid)
-        after = self.balance_fn(self.settings.comfy_api_key)
-        observed = None
-        if after is not None and t["balance_before_credits"] is not None:
-            observed = round(t["balance_before_credits"] - after, 2)
-        self._set(tid, None, balance_after_credits=after, observed_credits=observed)
-        if observed is not None:
-            with self.db.tx() as c:
-                c.execute("UPDATE spend SET observed_credits=? WHERE id=(SELECT id FROM spend WHERE take_id=? "
-                          "ORDER BY at DESC LIMIT 1)", (max(observed, 0.0), tid))
+        before = self.db.one("SELECT balance_before_credits FROM takes WHERE id=?", tid)["balance_before_credits"]
+        tries = self.settings.charge_settle_attempts if attempts is None else attempts
+        after = None
+        for i in range(max(tries, 1)):
+            if i:
+                self.sleep(self.settings.charge_settle_s)
+            after = self.balance_fn(self.settings.comfy_api_key)
+            if after is not None and before is not None and before - after > 0:
+                observed = round(before - after, 2)
+                self._set(tid, None, balance_after_credits=after, observed_credits=observed)
+                with self.db.tx() as c:
+                    c.execute("UPDATE spend SET observed_credits=? WHERE id=(SELECT id FROM spend WHERE take_id=? "
+                              "ORDER BY at DESC LIMIT 1)", (observed, tid))
+                with self.db.tx() as c:
+                    c.execute("INSERT INTO take_events(take_id,state,detail,at) VALUES (?,?,?,?)",
+                              (tid, "charged", f"{observed} credits observed (balance {before} -> {after})", now()))
+                return
+        self._set(tid, None, balance_after_credits=after)
+        with self.db.tx() as c:
+            c.execute("INSERT INTO take_events(take_id,state,detail,at) VALUES (?,?,?,?)",
+                      (tid, "charge_pending", "balance has not dropped yet; the estimate stays reserved. "
+                       "Use reconcile later.", now()))
 
     def reconcile_charge(self, tid: str) -> dict:
-        """Re-read the balance later (Partner Nodes may post cost after execution). Only meaningful
-        while no other paid activity happened since this take finished."""
-        self._observe_charge(tid)
+        """Re-read the balance later. Only meaningful while no other paid activity happened since
+        this take finished (paid concurrency is 1)."""
+        self._observe_charge(tid, attempts=1)
         return self.ops.get_take(tid)
 
     # -- recovery and human resolution ---------------------------------------------------------
