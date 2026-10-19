@@ -17,7 +17,7 @@ Design: [HLD.md](HLD.md) · Plan and status: [IMPLEMENTATION_PLAN.md](IMPLEMENTA
 | App | Python ≥ 3.11 (3.12 tested), [uv](https://docs.astral.sh/uv/) (or `python -m venv` + `pip`), git |
 | UI build | Node.js ≥ 20.19 or ≥ 22.12 (Vite 8) with npm (Node 26 tested) |
 | Media (recommended) | `ffmpeg` + `ffprobe`. The fake adapter renders placeholder clips with ffmpeg (otherwise it copies a bundled sample), and ffprobe records duration, size and audio of saved takes |
-| Real route only | About 3 GB of disk for ComfyUI + torch in `./runtime`; a Comfy account API key with credits |
+| Real route only | About 2 GB of disk for ComfyUI + torch in `./runtime` (1.7 GB measured); a Comfy account API key with credits |
 
 ## Quick start (no account, no spend)
 

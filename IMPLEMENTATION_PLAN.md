@@ -218,6 +218,26 @@ Fixed offline before or after the run:
 | 5 | Accounting: reported / calculated / confirmed separated; first-run rows unchanged and labelled incomplete; new rows keep raw tool-use, modality and reasoning fields | ✅ tests; live-test data migrated (usage rows byte-compared before and after) |
 | 6 | Clean checkout: install, UI build, tests and fake-mode start without credentials, data or runtime | see §5e |
 
+## 5e. Clean-checkout verification (2026-10-20)
+
+A fresh `git clone` of commit `510696e` into an empty directory. No `.env`, `data/`, `runtime/`, `node_modules/`, `dist/` or `backups/`, and no API-key variables in the environment. README steps run as written:
+
+| Step | Result |
+|---|---|
+| `uv venv` + `uv pip install -e ".[dev]"` | ✅ (2 s with a warm uv cache; a new machine downloads the packages) |
+| `cd web && npm ci && npm run build` | ✅ Vite build OK. npm noted that dependency install scripts weren't run; the build didn't need them |
+| `pytest -q` | ✅ 109 passed, 1 skipped (the check that needs the local live-run backup, absent by design) |
+| `./scripts/run_app.sh` with no `.env` | ✅ fake video (paid caps 0/0), scripted agent, live LLM budget 0 and request cap 0, no credentials detected, UI served |
+| Fake flow: project → frame → shot → proposal → approve → take (h264, probed) → select → export ZIP; one scripted agent turn | ✅ 0 live requests; **no non-loopback network connections** from the app process (`lsof`) |
+| `./scripts/setup_comfy.sh` | ✅ ComfyUI v0.42.1, torch 2.14.1 with MPS, 1.7 GB in `runtime/` (13 s with a warm cache) |
+| `scripts/comfy_check.py graphs` (offline validation) | ✅ first_frame and reference ×1/×3/×9 all VALID |
+
+**Not verified from the clean checkout:**
+- `scripts/run_comfy.sh` and `comfy_check.py versions`: ports 8188/8189 were taken by the existing instance. Both were verified earlier in the original checkout.
+- A submission through the proxy and `comfy_check.py balance`: these need a key, and a probe sends an unauthenticated request to api.comfy.org.
+- Any paid generation (none authorised) and any live LLM call (none authorised).
+- Cold-cache install time and download size.
+
 ## 6. Main risks
 
 | Risk | Mitigation |
