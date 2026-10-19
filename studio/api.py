@@ -22,6 +22,9 @@ from .generation import BudgetError, GenerationService
 from .media import MediaError, MediaStore
 from .ops import FEEDBACK_REASONS, ConflictError, NotFoundError, Ops
 from .worker import Dispatcher
+from .agent.loop import AgentBudgetError, AgentRunner
+from .agent.providers.base import ProviderConfigError
+from .agent.store import AgentStore
 
 log = logging.getLogger("studio")
 
@@ -78,6 +81,24 @@ class AssetVersionIn(BaseModel):
     media_sha: str | None = None
 
 
+class DecisionIn(BaseModel):
+    text: str
+
+
+class LockIn(BaseModel):
+    locked: bool
+
+
+class ThreadIn(BaseModel):
+    provider: str | None = None
+    model: str | None = None
+
+
+class AgentMessageIn(BaseModel):
+    text: str
+    focus_shot_id: str | None = None
+
+
 class ResolveIn(BaseModel):
     job_id: str | None = None
     resubmit: bool = False
@@ -92,6 +113,7 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     ops = Ops(db)
     adapter = adapter or make_adapter(settings)
     service = GenerationService(db, ops, media, adapter, settings, balance_fn=balance_fn)
+    agent = AgentRunner(settings, ops, service, media, AgentStore(db))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -104,6 +126,7 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
 
     app = FastAPI(title="MotionX Shot Studio", lifespan=lifespan)
     app.state.settings, app.state.service, app.state.ops, app.state.media = settings, service, ops, media
+    app.state.agent = agent
 
     def err(status: int, e: Exception) -> JSONResponse:
         return JSONResponse(status_code=status, content={"error": type(e).__name__, "detail": str(e)})
@@ -123,6 +146,18 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     @app.exception_handler(UnsupportedRequest)
     async def _us(_: Request, e: UnsupportedRequest):
         return err(422, e)
+
+    @app.exception_handler(AgentBudgetError)
+    async def _ab(_: Request, e: AgentBudgetError):
+        return err(402, e)
+
+    @app.exception_handler(ProviderConfigError)
+    async def _pc(_: Request, e: ProviderConfigError):
+        return err(400, e)
+
+    @app.exception_handler(PermissionError)
+    async def _pe(_: Request, e: PermissionError):
+        return err(403, e)
 
     @app.exception_handler(ValueError)
     async def _ve(_: Request, e: ValueError):
@@ -161,6 +196,52 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     @app.get("/api/projects/{pid}")
     def get_project(pid: str) -> dict:
         return {**ops.get_project(pid), "shots": ops.list_shots(pid), "scenes": ops.list_scenes(pid)}
+
+    # -- decisions, lock, revision history --------------------------------------------------
+    @app.get("/api/projects/{pid}/decisions")
+    def list_decisions(pid: str) -> list[dict]:
+        return ops.list_decisions(pid)
+
+    @app.post("/api/projects/{pid}/decisions", status_code=201)
+    def add_decision(pid: str, body: DecisionIn) -> dict:
+        return ops.add_decision(pid, body.text, by="user")
+
+    @app.post("/api/shots/{sid}/lock")
+    def lock(sid: str, body: LockIn) -> dict:
+        return ops.set_locked(sid, body.locked)
+
+    @app.get("/api/shots/{sid}/revisions")
+    def revisions(sid: str) -> list[dict]:
+        ops.get_shot_row(sid)
+        return ops.list_revisions(sid)
+
+    # -- agent (reads never execute tools; only POST .../messages runs a turn) --------------
+    @app.get("/api/agent/config")
+    def agent_config() -> dict:
+        prov = settings.agent_provider
+        return {"provider": prov, "model": agent.default_model(prov), "live": prov != "scripted",
+                "budget_usd": settings.agent_budget_usd, "spent_usd": agent.store.live_spend_usd(),
+                "max_turns": settings.agent_max_turns, "max_output_tokens": settings.agent_max_output_tokens,
+                "credentials": {"gemini": bool(settings.gemini_api_key or settings.gemini_vertex_project),
+                                "anthropic": bool(settings.anthropic_api_key)}}
+
+    @app.get("/api/projects/{pid}/agent/threads")
+    def list_threads(pid: str) -> list[dict]:
+        return agent.store.threads(pid)
+
+    @app.post("/api/projects/{pid}/agent/threads", status_code=201)
+    def create_thread(pid: str, body: ThreadIn) -> dict:
+        return agent.create_thread(pid, body.provider, body.model)
+
+    @app.get("/api/agent/threads/{tid}")
+    def get_thread(tid: str) -> dict:
+        return agent.view(tid)
+
+    @app.post("/api/agent/threads/{tid}/messages")
+    async def send_message(tid: str, body: AgentMessageIn) -> dict:
+        import asyncio
+        report = await asyncio.to_thread(agent.send, tid, body.text, body.focus_shot_id)
+        return {**agent.view(tid), "report": report.__dict__}
 
     # -- scenes and assets ------------------------------------------------------------------
     @app.post("/api/projects/{pid}/scenes", status_code=201)

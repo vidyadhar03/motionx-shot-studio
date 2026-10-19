@@ -17,6 +17,7 @@ export type Shot = {
   duration_s: number; resolution: string; seed: number | null; start_frame_sha: string | null;
   selected_take_id: string | null; proposals: Proposal[]; takes: Take[];
   scene_id: string | null; mode: "first_frame" | "reference"; aspect_ratio: string;
+  camera_detail: string; audio: string; locked: number;
   refs: { asset_version_id: string }[]; refs_resolved: RefResolved[];
   revisions: { revision: number; author: string; at: string }[];
 };
@@ -24,7 +25,7 @@ export type Shot = {
 export type Proposal = {
   id: string; shot_id: string; shot_revision: number; workflow_id: string; resolved_prompt: string;
   est_credits: number; adapter: string; is_paid: number; created_by: string; note: string;
-  parent_take_id: string | null; status: string; created_at: string;
+  parent_take_id: string | null; status: string; created_at: string; stale_reason: string | null;
   request: { seed: number; duration_s: number; resolution: string; aspect_ratio: string | null;
              start_frame: { sha256: string; width: number; height: number } | null;
              references: { sha256: string; width: number; height: number }[] };
@@ -49,6 +50,18 @@ export type Status = {
 export type Presets = { presets: Record<string, string[]>; labels: Record<string, Record<string, string>>;
                         descriptions: Record<string, Record<string, string>>;
                         reference: { max_images: number; aspect_ratios: string[] } };
+
+export type Decision = { id: string; text: string; decided_by: string; at: string };
+export type Revision = { revision: number; author: string; at: string; diff: Record<string, { from: unknown; to: unknown }> };
+export type AgentConfig = { provider: string; model: string; live: boolean; budget_usd: number; spent_usd: number;
+                            max_turns: number; max_output_tokens: number; credentials: Record<string, boolean> };
+export type AgentThread = { id: string; project_id: string; provider: string; model: string; title: string; created_at: string };
+export type AgentMessage = { id: number; kind: "user" | "assistant_text" | "notice"; at: string;
+                             content: { text: string; focus_shot_id?: string; level?: string; stop?: string } };
+export type AgentCall = { id: number; call_id: string; name: string; input: Record<string, any>; status: string;
+                          result: { content: Record<string, any>; is_error: boolean; images: { mime: string; sha256: string }[] } | null;
+                          started_at: string; finished_at: string | null };
+export type ThreadView = { thread: AgentThread; messages: AgentMessage[]; tool_calls: AgentCall[]; live_spend_usd: number };
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -90,6 +103,16 @@ export const api = {
   feedback: (tid: string, reason: string, note: string) => call<Take>("POST", `/api/takes/${tid}/feedback`, { reason, note }),
   review: (tid: string, review: string) => call<Take>("POST", `/api/takes/${tid}/review`, { review }),
   select: (sid: string, take_id: string | null) => call<Shot>("POST", `/api/shots/${sid}/select`, { take_id }),
+  decisions: (pid: string) => call<Decision[]>("GET", `/api/projects/${pid}/decisions`),
+  addDecision: (pid: string, text: string) => call<Decision>("POST", `/api/projects/${pid}/decisions`, { text }),
+  lock: (sid: string, locked: boolean) => call<Shot>("POST", `/api/shots/${sid}/lock`, { locked }),
+  revisions: (sid: string) => call<Revision[]>("GET", `/api/shots/${sid}/revisions`),
+  agentConfig: () => call<AgentConfig>("GET", "/api/agent/config"),
+  threads: (pid: string) => call<AgentThread[]>("GET", `/api/projects/${pid}/agent/threads`),
+  createThread: (pid: string) => call<AgentThread>("POST", `/api/projects/${pid}/agent/threads`, {}),
+  thread: (tid: string) => call<ThreadView>("GET", `/api/agent/threads/${tid}`),
+  sendAgent: (tid: string, text: string, focus_shot_id: string | null) =>
+    call<ThreadView>("POST", `/api/agent/threads/${tid}/messages`, { text, focus_shot_id }),
   resume: (tid: string) => call<Take>("POST", `/api/takes/${tid}/resume`),
   resolve: (tid: string, body: { job_id?: string; resubmit?: boolean }) => call<Take>("POST", `/api/takes/${tid}/resolve`, body),
   candidates: (tid: string) => call<{ jobs: { id: string; status: string; created_at: string }[] }>("GET", `/api/takes/${tid}/candidates`),

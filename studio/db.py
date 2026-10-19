@@ -93,6 +93,9 @@ CREATE TABLE IF NOT EXISTS shots (
   mode TEXT NOT NULL DEFAULT 'first_frame',      -- first_frame | reference (selects the workflow)
   aspect_ratio TEXT NOT NULL DEFAULT '16:9',     -- reference mode only; first-frame follows the frame
   refs TEXT NOT NULL DEFAULT '[]',               -- JSON [{asset_version_id}] in prompt order (Image 1..N)
+  camera_detail TEXT NOT NULL DEFAULT '',        -- qualifies camera_move ("very slow, ends on her eyes")
+  audio TEXT NOT NULL DEFAULT '',                -- sound direction ("rain on cobbles, no music")
+  locked INTEGER NOT NULL DEFAULT 0,             -- 1 = human-locked: agent writes refused
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -119,6 +122,9 @@ CREATE TABLE IF NOT EXISTS proposals (
   created_by TEXT NOT NULL,                       -- user | agent
   note TEXT NOT NULL DEFAULT '',
   parent_take_id TEXT,
+  context TEXT,                                   -- JSON: shot revision, direction/request/workflow shas
+  context_hash TEXT,                              -- sha256 of context; re-checked at approval
+  stale_reason TEXT,
   status TEXT NOT NULL,                           -- pending | approved | rejected | stale | superseded
   decided_by TEXT, decided_at TEXT,
   created_at TEXT NOT NULL
@@ -171,6 +177,58 @@ CREATE TABLE IF NOT EXISTS feedback (
 
 -- Paid-spend ledger. A row is written at approval (reservation) so concurrent approvals
 -- cannot jointly exceed the budget; a definite pre-job rejection deletes it.
+-- Recorded creative decisions. People write them; the agent can only read them.
+CREATE TABLE IF NOT EXISTS decisions (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  text TEXT NOT NULL,
+  decided_by TEXT NOT NULL,
+  at TEXT NOT NULL
+);
+
+-- Agent conversation. Append-only; provider-native items are stored verbatim and resent unchanged.
+CREATE TABLE IF NOT EXISTS agent_threads (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT 'Agent thread',
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id TEXT NOT NULL REFERENCES agent_threads(id),
+  kind TEXT NOT NULL,              -- user | assistant_text | provider_item | notice
+  content TEXT NOT NULL,           -- JSON
+  at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_tool_calls (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id TEXT NOT NULL REFERENCES agent_threads(id),
+  call_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  input TEXT NOT NULL,
+  status TEXT NOT NULL,            -- started | done | error | interrupted
+  result TEXT,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  UNIQUE (thread_id, call_id)
+);
+CREATE TABLE IF NOT EXISTS agent_usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id TEXT NOT NULL REFERENCES agent_threads(id),
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  input_tokens INTEGER NOT NULL,
+  output_tokens INTEGER NOT NULL,   -- includes thinking tokens where billed as output
+  est_usd REAL NOT NULL,
+  live INTEGER NOT NULL,
+  at TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS agent_messages_append_only
+BEFORE UPDATE ON agent_messages
+BEGIN SELECT RAISE(ABORT, 'agent history is append-only'); END;
+
 -- One row per paid submission attempt (a take resubmitted after `submission_unknown` has two).
 CREATE TABLE IF NOT EXISTS spend (
   id TEXT PRIMARY KEY,
@@ -220,7 +278,11 @@ class Database:
         "shots": [("scene_id", "TEXT REFERENCES scenes(id)"),
                   ("mode", "TEXT NOT NULL DEFAULT 'first_frame'"),
                   ("aspect_ratio", "TEXT NOT NULL DEFAULT '16:9'"),
-                  ("refs", "TEXT NOT NULL DEFAULT '[]'")],
+                  ("refs", "TEXT NOT NULL DEFAULT '[]'"),
+                  ("camera_detail", "TEXT NOT NULL DEFAULT ''"),
+                  ("audio", "TEXT NOT NULL DEFAULT ''"),
+                  ("locked", "INTEGER NOT NULL DEFAULT 0")],
+        "proposals": [("context", "TEXT"), ("context_hash", "TEXT"), ("stale_reason", "TEXT")],
     }
 
     def _migrate(self, conn: sqlite3.Connection) -> None:

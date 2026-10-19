@@ -30,7 +30,7 @@ No `AGENTS.md` or `CLAUDE.md` exists in spike, video-harness, locvis or location
 | **M0** | Mon 19 – Tue 20 | Local execution stack installed and pinned. API-format H3 first-frame workflow and manifest. Repo scaffold. Fake adapter. Zero-cost route probe | **Done. Real first-frame execution verified**: one paid H3 take on 2026-10-20 (`docs/RUNS.md`) |
 | **M1** | Tue 20 – Thu 22 | Vertical slice: upload frame → shot → proposal → approval → take → feedback → second take, both retained | **Done.** The revision flow (feedback → second take → compare) is verified with **fake outputs**. Only **one real take** exists; a real second take hasn't been run |
 | **M2** | Fri 23 – Sat 24 | Project-scoped Character/Location/Prop assets with immutable versions, scenes, the reference path (`h3_reference` via `MinimaxHailuo03ReferenceNode`, 1–9 images, "Image N" binding), capability errors in the UI | **Done (2026-10-20) on the fake adapter plus offline ComfyUI graph validation.** No real reference-to-video generation has run (§5b) |
-| **M3** | Sun 25 – Mon 26 | Agent: one loop, 4 tools (`list`, `read`, `write`, `propose_generation`), `skills/shot-direction.md`, persisted thread. The agent can propose and can't approve | Planned. `generation.py` already separates `create_proposal` (agent-safe) from `approve` (human HTTP route only) |
+| **M3** | Sun 25 – Mon 26 | Agent: one loop, 4 project-scoped tools, `skills/shot-direction.md`, persisted threads and tool ledger; providers scripted (dev default), **Gemini (default live)**, Anthropic; LLM spend cap | **Done (2026-10-20) with the scripted provider and mocked SDK tests.** No live LLM call has been made (§5c) |
 | **M4** | Tue 27 – Wed 28 | Export (selected MP4s + manifest), cancel, README check from a clean clone | Planned |
 | **M5** | Thu 29 | Demo project with licensed inputs, demo video, publish (needs approval), submit | Planned |
 
@@ -144,6 +144,50 @@ All of these are **fake-adapter or offline results** unless marked otherwise. Cr
 - Reference-mode output aspect and quality at 768P, and the real charge (the estimate assumes no reference video and ≤ 5 images).
 - A real two-take revision: only one real take exists (first frame).
 - Prompt-descriptor adherence beyond run 1, where the push-in was subtle and low-key lighting wasn't applied.
+
+## 5c. M3 results (scripted provider, mocked SDKs, fake video adapter)
+
+**Gemini verification (docs + installed SDK, 2026-10-20; no API calls).**
+- SDK: `google-genai` 2.31.0, Apache-2.0.
+- API: Interactions API, stateless (`store=False`). The full history is resent; thought steps keep their `signature` unchanged.
+- Function results may carry images on Gemini 3+.
+- Usage fields: `total_input_tokens`, `total_output_tokens`, `total_thought_tokens`. Thinking is billed as output.
+- Default model `gemini-3.8-flash` ($0.75 / $3.75 per 1M through 2026-12-31). `gemini-4-argon` is configurable ($2 / $10, doubling 2026-12-01).
+- Anthropic: `anthropic` 1.15.0, Messages API manual loop, default `claude-opus-5-5` ($4 / $20). Server-side fallbacks are deliberately off.
+
+| Area | Files |
+|---|---|
+| Provider interface and adapters | `studio/agent/providers/{base,scripted,gemini,anthropic_provider}.py` |
+| Loop: limits, LLM spend cap, live gates, call ledger, no fallback | `studio/agent/loop.py`, `studio/agent/pricing.py` |
+| Four project-scoped tools: path routing, read surface, draft-only writes | `studio/agent/tools.py` |
+| Append-only threads, provider-native items, tool ledger, usage | `studio/agent/store.py`, `studio/db.py` |
+| New shot fields `camera_detail` and `audio`, contradiction and timing checks, `locked`; decisions; revision diffs | `studio/compiler.py`, `studio/ops.py` |
+| Context-bound proposals; staleness on direction change and at approval | `studio/generation.py`, `studio/ops.py` |
+| Skill | `skills/shot-direction.md` |
+| UI: agent panel (thread, tool calls, write diffs, proposals), camera detail and sound fields, lock, history, decisions, stale reasons | `web/src/AgentPanel.tsx`, `ShotEditor.tsx`, `ProjectPanel.tsx`, `ProposalCard.tsx` |
+| Tests | `tests/test_m3_agent.py` (28); suite total **71 passed** |
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Exactly four tools. No approve/submit/select/asset/decision/budget path. Unknown paths and tools refused | ✅ tests |
+| 2 | Agent writes: field whitelist (no start frame, resolution or seed), `expected_revision` required, locked shots refused, other projects unreachable | ✅ tests |
+| 3 | "Push in slower", timing and sound reach the prompt through `camera_move` + `camera_detail`, timed `action` beats, `audio`. A contradicting move, a time beyond the duration, or detail without a move is refused. Empty fields leave the M1/M2 prompt byte-identical | ✅ tests |
+| 4 | The read surface exposes brief, decisions, pinned versions (with newer-available) and take feedback; asset/frame reads attach the image | ✅ tests |
+| 5 | Freshness: a direction change marks pending proposals stale. An out-of-band change is caught at approval by the context hash. Pre-M3 proposals are stale | ✅ tests and UI ("stale: project direction changed", approve → 409) |
+| 6 | Persistence: append-only history (DB trigger). A repeated call id returns the stored result. An interrupted call is never re-run. Reload executes nothing | ✅ tests, plus a live server restart: thread, revisions and proposals identical (11 calls, all `done`) |
+| 7 | **Scripted offline demo** (UI): read context and decisions → feedback on take 1 → inspect @oli v1/v2 and @street → write `camera_detail`, `audio`, refs `@oli v1→v2` (rev 2, author agent) → pending proposal by agent with parent take → reload and restart with history intact | ✅ **scripted verification only** (rule-based, not an LLM) |
+| 8 | Gemini and Anthropic adapters: request shape, verbatim history with signatures/thinking, function/tool results with images, usage → spend, refusal executes no tools, failed interaction becomes an error notice | ✅ **against mocked SDK responses built from the SDKs' own types**. Not live |
+| 9 | Live gates: LLM budget 0 blocks before any call; worst-case estimate refused before calling; unknown model price refused; missing credentials and unknown provider give clear errors; no fallback | ✅ tests |
+| 10 | Real paid take and spend lock preserved after the M3 migration | ✅ snapshot `d62f9bb4…` and video `e5a09cfd…` unchanged; paid approval → 402 |
+
+**Not verified against live models (needs an approved LLM budget and key):**
+- That Gemini `gemini-3.8-flash` accepts our requests end to end: tool schemas, stateless history with thought signatures, image parts in `function_result`, `thinking_level`.
+- Whether the live model uses the tools sensibly: reads before writing, follows the skill's field rules, avoids contradictions, proposes once, doesn't loop.
+- The quality of its direction compared with the scripted rules.
+- Model-ID verification calls (`models.get` / `models.retrieve`).
+- Real token usage and cost against the estimate; the input estimate is a rough chars/3.5 + 1,600 per image.
+- The Anthropic adapter live; mocked only.
+- All of the above on real video: no paid generation was run in M3, and the reference path is still unverified against H3.
 
 ## 6. Main risks
 

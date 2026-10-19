@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, Asset, media, Presets, Scene, Shot } from "./api";
+import { api, Asset, media, Presets, Revision, Scene, Shot } from "./api";
 
 export type RevisionContext = { parentTakeId: string; parentNumber: number; note: string };
 
@@ -13,6 +13,7 @@ const fromShot = (s: Shot): Draft => ({
   title: s.title, intention: s.intention, action: s.action, framing: s.framing, camera_move: s.camera_move,
   lens_look: s.lens_look, lighting: s.lighting, duration_s: s.duration_s, resolution: s.resolution, seed: s.seed,
   start_frame_sha: s.start_frame_sha, scene_id: s.scene_id, mode: s.mode, aspect_ratio: s.aspect_ratio,
+  camera_detail: s.camera_detail ?? "", audio: s.audio ?? "",
   refs: s.refs.map((r) => r.asset_version_id),
 });
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
@@ -24,12 +25,15 @@ export default function ShotEditor({ shot, presets, assets, scenes, revision, on
   const [draft, setDraft] = useState<Draft>(fromShot(shot));
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
+  const [history, setHistory] = useState<Revision[]>([]);
   useEffect(() => setDraft(fromShot(shot)), [shot]);
+  useEffect(() => { api.revisions(shot.id).then(setHistory).catch(() => {}); }, [shot.id, shot.revision]);
 
   const base = useMemo(() => fromShot(shot), [shot]);
   const changes = Object.fromEntries(Object.entries(draft).filter(([k, v]) => !same(v, base[k])));
   const dirty = Object.keys(changes).length > 0;
-  const set = (k: string, v: Draft[string]) => setDraft((d) => ({ ...d, [k]: v === "" ? null : v }));
+  const set = (k: string, v: Draft[string]) =>
+    setDraft((d) => ({ ...d, [k]: v === "" && k !== "camera_detail" && k !== "audio" ? null : v }));
 
   // Every asset version, so a pinned older version still resolves after the asset moves on.
   const versions = useMemo(() => new Map(assets.flatMap((a) => a.versions.map((v) => [v.id, { asset: a, v }] as const))), [assets]);
@@ -77,7 +81,11 @@ export default function ShotEditor({ shot, presets, assets, scenes, revision, on
     <section className="editor">
       <div className="section-title">
         Shot <span className="rev">rev {shot.revision}{last ? ` · ${last.author}` : ""}</span>
+        {last?.author === "agent" && <span className="pill agent">edited by agent</span>}
         {dirty && <span className="dirty">unsaved changes</span>}
+        <button className={`small ${shot.locked ? "on" : "ghost"}`} title="A locked shot can't be edited by the agent"
+                onClick={() => api.lock(shot.id, !shot.locked).then(onChanged).catch(onError)}>
+          {shot.locked ? "🔒 Locked" : "Lock from agent"}</button>
       </div>
       {revision && (
         <div className="banner revise">
@@ -170,6 +178,14 @@ export default function ShotEditor({ shot, presets, assets, scenes, revision, on
             ))}
           </div>
           <div className="row">
+            <label>Camera detail (how the move behaves)
+              <input value={(draft.camera_detail as string) ?? ""} placeholder={draft.camera_move ? "e.g. very slow, ending on her eyes" : "choose a camera move first"}
+                     disabled={!draft.camera_move} onChange={(e) => set("camera_detail", e.target.value)} /></label>
+            <label>Sound
+              <input value={(draft.audio as string) ?? ""} placeholder="e.g. rain on cobbles, distant traffic, no music"
+                     onChange={(e) => set("audio", e.target.value)} /></label>
+          </div>
+          <div className="row">
             <label>Duration
               <select value={draft.duration_s as number} onChange={(e) => set("duration_s", Number(e.target.value))}>
                 {[4, 5, 6, 8, 10].map((d) => <option key={d} value={d}>{d}s</option>)}
@@ -187,13 +203,25 @@ export default function ShotEditor({ shot, presets, assets, scenes, revision, on
             <label>Seed <input placeholder="random" value={(draft.seed as number | null) ?? ""} inputMode="numeric"
                                onChange={(e) => set("seed", e.target.value === "" ? null : Number(e.target.value))} /></label>
           </div>
-          <p className="hint">Framing, camera, lens and lighting become prompt descriptors. They are not calibrated camera or lighting controls.</p>
+          <p className="hint">Framing, camera, lens and lighting become prompt descriptors. They are not calibrated camera or lighting controls.
+            Timed beats go in Action (“0–2s: …”) and must fit the duration.</p>
           <div className="actions">
             <button className="ghost" disabled={!dirty || busy} onClick={save}>Save</button>
             <button className="primary" disabled={busy} onClick={propose}>{dirty ? "Save & propose generation" : "Propose generation"}</button>
           </div>
         </div>
       </div>
+      {history.length > 1 && (
+        <details className="history">
+          <summary>History ({history.length} revisions)</summary>
+          <ul>
+            {history.slice(0, 8).map((r) => (
+              <li key={r.revision}><span className={`pill ${r.author === "agent" ? "agent" : ""}`}>{r.author}</span> rev {r.revision} ·{" "}
+                {Object.keys(r.diff).length ? Object.keys(r.diff).join(", ") : "created"} <span className="muted">{r.at.slice(11, 19)}</span></li>
+            ))}
+          </ul>
+        </details>
+      )}
     </section>
   );
 }

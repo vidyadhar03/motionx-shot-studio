@@ -49,10 +49,25 @@ cp .env.example .env                          # set COMFY_API_KEY and STUDIO_ADA
 - **Proposal → human approval → take**, with an immutable snapshot of every input.
 - **Review:** feedback, revise and compare, with every take kept.
 
+## Agent (M3)
+
+One agent loop with four project-scoped tools (`list`, `read`, `write`, `propose_generation`) and a filmmaking skill (`skills/shot-direction.md`). The agent can read the brief, decisions, assets, shots and take feedback; edit **draft** shots; and create **pending** proposals. It can't approve, submit, select takes, or change assets, decisions or budgets. Conversations and every tool call are stored. Reloading shows history and never re-runs anything.
+
+| Provider | Use | Configure |
+|---|---|---|
+| `scripted` | Development default. A rule-based stand-in, **not an AI**, used to verify the plumbing offline | `STUDIO_AGENT_PROVIDER=scripted` |
+| `gemini` | **Default live provider.** Google Gen AI SDK, Interactions API, `gemini-3.8-flash` | `STUDIO_AGENT_PROVIDER=gemini`, `GEMINI_API_KEY`, `STUDIO_AGENT_BUDGET_USD>0` |
+| `anthropic` | Alternative live provider. `claude-opus-5-5` | `STUDIO_AGENT_PROVIDER=anthropic`, `ANTHROPIC_API_KEY`, `STUDIO_AGENT_BUDGET_USD>0` |
+
+- **No automatic fallback** between providers.
+- **LLM spend cap:** `STUDIO_AGENT_BUDGET_USD` is separate from Comfy credits. It defaults to 0, which blocks all live calls.
+- **Before a live run:** the model ID is verified with the provider.
+- **Status:** live providers are tested against mocked SDK responses only.
+
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest -q             # offline; fake adapter; no credits
+.venv/bin/python -m pytest -q             # offline; fake video adapter, scripted agent, mocked Gemini/Anthropic SDKs
 .venv/bin/python scripts/comfy_check.py graphs   # offline: ComfyUI validates the real graphs, runs nothing
 ```
 

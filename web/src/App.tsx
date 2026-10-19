@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ACTIVE, api, Asset, Presets, Project, Scene, Shot, ShotSummary, Status } from "./api";
 import AssetsPanel from "./AssetsPanel";
+import AgentPanel from "./AgentPanel";
 import ShotEditor, { RevisionContext } from "./ShotEditor";
 import ProposalCard from "./ProposalCard";
 import TakeCard from "./TakeCard";
@@ -18,7 +19,7 @@ export default function App() {
   const [compare, setCompare] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = useCallback((e: unknown) => setError(e instanceof Error ? e.message : String(e)), []);
 
   const refreshStatus = useCallback(() => api.status().then(setStatus).catch(fail), []);
   const refreshProject = useCallback((id: string) => {
@@ -133,6 +134,11 @@ export default function App() {
         </aside>
 
         <main className="main">
+          {project && (
+            <AgentPanel projectId={project.id} focusShot={shot ? { id: shot.id, title: shot.title } : null}
+                        onStateChanged={() => { if (shot) refreshShot(shot.id); refreshProject(project.id); }}
+                        onOpenShot={(id) => openShot(id)} onError={fail} />
+          )}
           {!shot && project && <div className="empty big">Select a shot or add one.<br /><button onClick={() => newShot()}>+ Shot</button></div>}
           {shot && presets && status && (
             <>

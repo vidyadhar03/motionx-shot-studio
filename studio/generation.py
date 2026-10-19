@@ -143,6 +143,22 @@ class GenerationService:
                              references=tuple(refs),
                              aspect_ratio=shot.get("aspect_ratio") if manifest.mode == "reference" else None)
 
+    def _context(self, req: RenderRequest, shot: dict, project: dict) -> dict[str, Any]:
+        """Everything that determines what an approval would actually run. Bound to the proposal and
+        re-derived from current state at approval: any difference makes the proposal stale."""
+        manifest = self.adapter.manifest(req.workflow_id)
+        request = req.to_json()
+        for img in ([request["start_frame"]] if request.get("start_frame") else []) + list(request.get("references", [])):
+            img.pop("path", None)                      # local paths are not part of the meaning
+        direction = project["direction"] if isinstance(project["direction"], str) else dumps(project["direction"])
+        return {
+            "shot_revision": shot["revision"],
+            "direction_sha": hashlib.sha256(direction.encode()).hexdigest(),
+            "request_sha": hashlib.sha256(dumps(request).encode()).hexdigest(),
+            "workflow_sha": hashlib.sha256((_sha_file(manifest.workflow_path) + _sha_file(
+                self.settings.workflows_dir / f"{manifest.id}.manifest.json")).encode()).hexdigest(),
+        }
+
     def create_proposal(self, sid: str, *, created_by: str = "user", note: str = "",
                         parent_take_id: str | None = None, workflow_id: str | None = None) -> dict:
         """No cost and no side effect outside our DB. Safe for the agent to call."""
@@ -157,14 +173,16 @@ class GenerationService:
         manifest = self.adapter.manifest(workflow_id)
         manifest.capabilities.validate(req)            # UnsupportedRequest -> 422, before any cost
         est = manifest.credits_estimate(req.duration_s, req.resolution, len(req.references))
+        context = self._context(req, shot, project)
         pid = new_id("prp")
         with self.db.tx(immediate=True) as c:
             c.execute("UPDATE proposals SET status='superseded' WHERE shot_id=? AND status='pending'", (sid,))
             c.execute("INSERT INTO proposals(id,shot_id,shot_revision,workflow_id,request,resolved_prompt,est_credits,"
-                      "adapter,is_paid,created_by,note,parent_take_id,status,created_at) "
-                      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      "adapter,is_paid,created_by,note,parent_take_id,context,context_hash,status,created_at) "
+                      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (pid, sid, shot["revision"], workflow_id, dumps(req.to_json()), req.prompt, est,
-                       self.adapter.name, int(self.adapter.is_paid), created_by, note, parent_take_id, "pending", now()))
+                       self.adapter.name, int(self.adapter.is_paid), created_by, note, parent_take_id,
+                       dumps(context), hashlib.sha256(dumps(context).encode()).hexdigest(), "pending", now()))
         return self.get_proposal(pid)
 
     def get_proposal(self, pid: str) -> dict:
@@ -190,6 +208,12 @@ class GenerationService:
         if existing:
             return self.ops.get_take(existing["id"]), False
         versions = self.adapter.versions()                     # network probe: outside the transaction
+        stale_reason = self._freshness(pid)
+        if stale_reason:
+            with self.db.tx() as c:
+                c.execute("UPDATE proposals SET status='stale', stale_reason=? WHERE id=? AND status='pending'",
+                          (stale_reason, pid))
+            raise ConflictError(f"proposal is stale: {stale_reason}; create a new proposal")
         stale = False
         tid = new_id("tk")
         with self.db.tx(immediate=True) as c:
@@ -234,6 +258,32 @@ class GenerationService:
         if stale:
             raise ConflictError("the shot changed after this proposal was made; it is now stale")
         return self.ops.get_take(tid), created
+
+    def _freshness(self, pid: str) -> str | None:
+        """None if the proposal still describes exactly what approval would run; otherwise why not."""
+        p = self.db.one("SELECT * FROM proposals WHERE id=?", pid)
+        if not p or p["status"] != "pending":
+            return None                                   # approve() reports these states itself
+        if not p["context_hash"]:
+            return "made before context binding; propose again"
+        shot = self.ops.get_shot_row(p["shot_id"])
+        project = self.db.one("SELECT * FROM projects WHERE id=?", shot["project_id"])
+        old = json.loads(p["context"])
+        try:
+            req = self.build_request(shot, {**project, "direction": json.loads(project["direction"])},
+                                     p["workflow_id"], seed=json.loads(p["request"])["seed"])
+            new = self._context(req, shot, project)
+        except (ValueError, UnsupportedRequest) as e:
+            return f"inputs no longer valid ({e})"
+        if new == old:
+            return None
+        if new["shot_revision"] != old["shot_revision"]:
+            return f"shot changed (revision {old['shot_revision']} -> {new['shot_revision']})"
+        if new["direction_sha"] != old["direction_sha"]:
+            return "project direction changed"
+        if new["workflow_sha"] != old["workflow_sha"]:
+            return "workflow or manifest changed"
+        return "generation inputs changed"
 
     def _snapshot(self, p: dict, shot: dict, project: dict, number: int, by: str, ts: str,
                   versions: dict[str, str]) -> dict[str, Any]:

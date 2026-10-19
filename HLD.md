@@ -62,7 +62,7 @@ The manual controls and the agent create the **same** proposal through the **sam
 └───────────────┬────────────────────────────┘
                 │ HTTP (JSON + multipart); the UI polls take status
 ┌───────────────▼──────────────── Python process (FastAPI) ─────────────────────┐
-│  HTTP routes ──┐                 Agent loop (Anthropic tool use) ──┐          │
+│  HTTP routes ──┐        Agent loop (provider adapters: Gemini · Anthropic) ┐│
 │                ▼                                                   ▼          │
 │  ┌──────────── Operations layer (single source of rules) ───────────────────┐ │
 │  │ projects · assets/versions · scenes · shots(revisions) · proposals ·     │ │
@@ -94,7 +94,7 @@ The manual controls and the agent create the **same** proposal through the **sam
 
 ## 4. Minimal data model (SQLite)
 
-**Implemented:** Project, Scene, Asset, AssetVersion (DB-enforced append-only), Shot (with `mode`, `aspect_ratio`, pinned `refs`), ShotRevision, Proposal, Take (+ take events), Feedback, and a spend ledger. AgentMessage arrives in M3. All IDs are prefixed random ids. Media is stored content-addressed at `data/media/<sha256>.<ext>`. Rows marked *immutable* are never updated after creation.
+**Implemented:** Project, Scene, Asset, AssetVersion (DB-enforced append-only), Shot (with `mode`, `aspect_ratio`, pinned `refs`, `camera_detail`, `audio`, `locked`), ShotRevision, Proposal (context-bound), Take (+ take events), Feedback, Decision, a spend ledger, and the agent thread/message/tool-call/usage tables. All IDs are prefixed random ids. Media is stored content-addressed at `data/media/<sha256>.<ext>`. Rows marked *immutable* are never updated after creation.
 
 | Entity | Key fields | Notes |
 |---|---|---|
@@ -102,12 +102,13 @@ The manual controls and the agent create the **same** proposal through the **sam
 | **Asset** | id, project_id, kind `character\|location\|prop`, name, handle (`@oli`), current_version_id | A named element |
 | **AssetVersion** *immutable* | id, asset_id, version (1,2,…), description, media_sha256, mime, width, height, created_at | A new image or a changed description makes a new version |
 | **Scene** | id, project_id, name, order | Grouping only |
-| **Shot** | id, scene_id, order, revision, intention, action, framing, camera_move, lens_look, lighting, duration_s, resolution, aspect, start_frame (media sha or AssetVersion id), refs[] (asset_version_id, role, prompt_label), status `draft\|locked`, selected_take_id | `revision` increments on every edit. Refs pin **versions**, not assets |
+| **Shot** | id, scene_id, order, revision, intention, action, framing, camera_move, **camera_detail**, lens_look, lighting, **audio**, duration_s, resolution, aspect, start_frame, refs[], **locked**, selected_take_id | `revision` increments on every edit. Refs pin **versions**, not assets |
 | **ShotRevision** *immutable* | shot_id, revision, fields JSON, author `user\|agent`, at | Gives undo and the "who changed this" history |
-| **Proposal** | id, shot_id, shot_revision, workflow_id, mode `first_frame\|reference`, compiled RenderRequest JSON, resolved_prompt, est_credits, created_by, status `pending\|approved\|rejected\|stale`, decided_by/at | Frozen at approval. Goes `stale` if the shot revision moves |
+| **Proposal** | id, shot_id, shot_revision, workflow_id, compiled RenderRequest JSON, resolved_prompt, est_credits, **context_hash**, created_by, status, stale_reason, decided_by/at | Frozen at approval. Goes `stale` when its input context changes (§6.4) |
 | **Take** | id, shot_id, proposal_id (UNIQUE), number, parent_take_id, state (§8), snapshot JSON *immutable*, idempotency_key, comfy_job_id, output_sha256, output_meta, credits_est, error, review `unreviewed\|approved\|rejected` | One proposal yields at most one take |
 | **Feedback** | id, take_id, author, reason (small enum), note, at | Reasons: identity, composition, motion, camera, lighting, artifact, timing, other |
-| **AgentMessage** | id, project_id, role, content JSON, at | Persisted conversation, replayed on reload |
+| **Decision** | id, project_id, text, decided_by, at | Recorded by people; read-only to the agent |
+| **AgentThread / AgentMessage / AgentToolCall / AgentUsage** | see §6.5–6.6 | Append-only; provider-native items kept verbatim |
 
 **Take.snapshot** stores everything needed to reproduce or audit the take without joins:
 
@@ -137,60 +138,100 @@ Updating an asset creates a new AssetVersion. Old takes still name the old versi
 
 The tool layer is a thin wrapper over these functions. Agent writes are attributed (`author=agent`) and show in the shot history with undo.
 
-## 6. Agent design: the smallest genuine agent
+## 6. Agent design: the smallest genuine agent (M3, reconciled 2026-10-20)
 
-**What it is.** One loop of about 200 lines, adapted from `motionx-spike/agent_claude.py`. It calls the Anthropic Messages API with tool use, reads results, and repeats until the model stops calling tools. Max 25 turns per user message. The model is configurable, defaulting to `claude-sonnet-5-5`, with `claude-opus-5-5` for harder direction work. There is no framework, planner or sub-agents.
+### 6.1 Shape
 
-**Tools (4)**
+- **One loop** owns turns, tool execution and persistence: `studio/agent/loop.py`. It drives a **provider interface** with one method: `complete(system, history, tools, limits) → Turn`. A `Turn` carries text, tool calls, opaque provider-native items to store and resend, usage, and a stop reason.
+- **Providers** are separate adapters that share the same loop, tools and project state:
 
-| Tool | Purpose |
+| Provider | Role | SDK and API |
+|---|---|---|
+| `scripted` | **Development default.** A deterministic script of tool calls derived from earlier tool results. No LLM, no network | – |
+| `gemini` | **Default live provider** | Google Gen AI SDK `google-genai` 2.31 (Apache-2.0), **Interactions API in stateless mode**: `client.interactions.create(model, input=history, tools, system_instruction, store=False, generation_config)`. Default model `gemini-3.8-flash` (the docs describe it as built for autonomous agents); `gemini-4-argon` is configurable |
+| `anthropic` | Alternative live provider | `anthropic` SDK, Messages API with a manual tool loop. Default model `claude-opus-5-5` |
+
+- **No automatic fallback** between providers. A missing credential, an unknown model, or a capability the provider lacks (e.g. images in tool results) is a clear error before any call.
+- **Who decides what:**
+  - The model decides what to read, when to load the skill, how to turn a note into field changes, which pinned versions to reference, when to propose, and when to stop and ask.
+  - Code decides everything else: path and field validation, revision checks, prompt compilation, the capability check, the cost estimate, freshness, approval (human HTTP only), submission and recovery, budgets, and persistence.
+
+### 6.2 Tools (exactly four, all project-scoped)
+
+The thread is bound to one project. Every path is relative to it, so another project is unreachable.
+
+| Tool | Paths |
 |---|---|
-| `list(path)` | Children as summaries: `/`, `/assets`, `/scenes/{id}`, `/shots/{id}/takes`, `/skills` |
-| `read(path)` | One node in full. For an image asset version or start frame, also returns the image so the model can see stills. Never returns video. |
-| `write(path, patch, expected_revision)` | Validated create/update on scenes and draft shots only (`extra="forbid"`). Errors say what *is* allowed. |
-| `propose_generation(shot_id, note)` | Calls `create_proposal`. Returns the compiled prompt, capability violations or the cost estimate. Doesn't submit. |
+| `list(path)` | `/` · `/decisions` · `/assets` · `/assets/{handle}` · `/scenes` · `/shots` · `/shots/{id}/takes` · `/shots/{id}/proposals` · `/skills` |
+| `read(path)` | `/` (brief, direction, counts) · `/decisions` · `/assets/{handle}` (all versions) · `/assets/{handle}/v{n}` (+ image) · `/scenes/{id}` · `/shots/{id}` (fields, revision, lock, **pinned versions with "newer available"**) · `/shots/{id}/start_frame` (+ image) · `/shots/{id}/takes/{n}` (state, review, **feedback**, resolved prompt, inputs; never video) · `/shots/{id}/proposals/{pid}` · `/skills/{name}` |
+| `write(path, patch, expected_revision)` | `/shots/{id}` updates a **draft** shot; `/shots` creates a draft shot; `/scenes` creates a scene. Nothing else |
+| `propose_generation(shot_id, note, parent_take_id?)` | `ops.create_proposal(created_by="agent")`. Returns the compiled prompt, cost estimate or capability error. **Never submits** |
 
-**What the model decides (tool-calling decisions):**
+**Enforced in code** (`studio/agent/tools.py` → `ops.py`):
 
-- Which project context to read.
-- When to load the skill.
-- How to turn a note like "make it more ominous, push in slower" into shot field changes.
-- Which asset versions to reference and in which roles.
-- Which path to propose (start frame or references).
-- When to stop and ask the user.
+- Unknown paths are refused with the list of allowed paths.
+- Agent writes may touch only `title`, `intention`, `action`, `framing`, `camera_move`, `camera_detail`, `lens_look`, `lighting`, `audio`, `duration_s`, `mode`, `aspect_ratio`, `refs` and `scene_id`. The agent can't set `start_frame_sha` (files come from people), `resolution` or `seed`.
+- An update needs `expected_revision`. A **locked** shot (human toggle) refuses agent writes.
+- There is no tool for: approve/reject, submit, select or review takes, feedback, asset create/version, decisions, project direction, or budgets.
+- Writes are attributed `author=agent` in `shot_revisions`. The UI shows a per-field diff for each agent revision.
 
-**What is deterministic application code:**
+### 6.3 Revision instructions → compiled prompt (no contradictions)
 
-- Prompt compilation from shot fields.
-- Capability validation.
-- The cost estimate.
-- Revision checks.
-- Approval (an HTTP button only).
-- Idempotent submission, polling, download and recovery.
-- Budget and concurrency limits.
-- Take numbering and snapshots.
+| Instruction kind | Lands in | Rule enforced in code |
+|---|---|---|
+| Which move ("push in", "track") | `camera_move` preset | One preset per shot |
+| How the move behaves ("slower", "ends on her eyes", "starts after 2 s") | **new** `camera_detail` (≤ 200 chars), rendered right after the preset phrase | Refused if it names a *different* move from the preset vocabulary (e.g. "pan" while `camera_move=push_in`). Change the preset instead. Refused if `camera_move` is empty |
+| Timing ("hold 2 s, then she turns") | `duration_s` (4–15) plus timed beats in `action` ("0–2s: …; 2–5s: …") | Any time mentioned in `action` or `camera_detail` must be ≤ `duration_s` |
+| Sound ("rain on cobbles, no music") | **new** `audio` (≤ 300 chars), rendered as `Sound: …` | H3 always generates audio; this steers it. Not a guarantee |
+| Lighting / lens / framing | existing presets | Changing the preset is the only way; free text doesn't restate them |
+| Story, performance, blocking | `intention` / `action` | – |
 
-The agent can't approve, submit, select takes or change assets.
+Compile order:
 
-**Context per turn.** The system prompt holds:
+`intention · action · framing · camera_move[ — camera_detail] · lens · lighting · Style: direction · [Image N bindings] · Sound: audio · closing line`
 
-- Role and rules.
-- The **skill index** (name and one-line description for each skill).
-- A compact project header: name, brief summary, direction, asset handles with current versions, and the shot the user has open.
+With `camera_detail` and `audio` empty, the output is byte-identical to M1/M2, so paid run 1 stays reproducible.
 
-Everything else is a `read` away. That's the Pi pattern the spike validated (peak context 24.5k tokens).
+### 6.4 Proposal freshness (bound to its input context)
 
-**Skill loading.** The skill is `skills/shot-direction.md`, readable at `/skills/shot-direction`. It covers:
+- Each proposal stores a `context_hash`, a sha256 over:
+  - workflow id, workflow file sha and manifest sha;
+  - the full RenderRequest (resolved prompt, so project direction and pinned asset descriptions are included; every input image sha; duration, resolution, aspect ratio and seed);
+  - the shot revision;
+  - the project direction as JSON.
+- At approval the request is **rebuilt from current state** with the proposal's seed and re-hashed. Any difference marks the proposal `stale`, with a reason (shot revision, project direction, inputs or workflow changed), and refuses approval.
+- `update_project(direction)` also marks that project's pending proposals stale right away, so the UI shows it before anyone clicks.
+- Pending proposals created before M3 have no hash and are treated as stale (re-propose).
 
-- Framing grammar, camera-move vocabulary and how each phrases for H3.
-- Continuity and eyelines.
-- Writing timed-shot prompts with audio, following MiniMax's published prompt guide.
-- Using "Image N" labels in reference mode.
-- How to turn review notes into concrete field changes.
+### 6.5 Conversation persistence and replay safety
 
-We extract the craft content from `motionx-spike/skills/shot-listing.md` and `scene-context.md`, dropping the Firestore-specific parts. A second skill isn't needed for October.
+| Table | Contents |
+|---|---|
+| `agent_threads` | id, project, provider, model |
+| `agent_messages` | Append-only rows: `user` text, `assistant` text, and **`provider_items`**, the provider-native items stored verbatim and resent unchanged |
+| `agent_tool_calls` | `call_id` UNIQUE per thread, name, input, `status` (`started` → `done` / `error` / `interrupted`), result |
 
-**Approval behaviour.** `propose_generation` creates a pending Proposal and the UI shows it as a card. The agent's turn ends with a sentence pointing at the card. If the user edits the shot afterwards, the proposal becomes `stale` and can't be approved. A new proposal is needed. A system-prompt rule says: if a tool limit changed your plan, say so. This addresses the spike's "invisible ceiling" failure.
+- **Provider-native items:**
+  - Gemini: every received step (`thought` with its `signature`, `function_call`, `model_output`) via `model_dump(mode="json", exclude_unset=True)`, plus our `function_result` steps.
+  - Anthropic: `response.content` blocks, including thinking blocks.
+- **Replay safety:**
+  - A tool call is recorded `started` **before** it executes and `done` with its result **after**.
+  - On reload the history is rebuilt from rows and nothing executes.
+  - If a call id is seen again, the stored result is returned and nothing re-executes.
+  - A call left `started` by a crash is never re-run. The model gets `interrupted: state unknown, re-read before retrying`, the same principle as `submission_unknown`.
+- History is append-only, as the providers' thinking/signature rules require.
+
+### 6.6 Limits, spend and verification
+
+- **Configuration:** `STUDIO_AGENT_PROVIDER` (`scripted` | `gemini` | `anthropic`), `STUDIO_AGENT_MODEL`, `STUDIO_AGENT_MAX_TURNS` (12), `STUDIO_AGENT_MAX_OUTPUT_TOKENS` (8,000), `STUDIO_AGENT_THINKING` (Gemini `thinking_level`, default `low`).
+- **Spend cap:** `STUDIO_AGENT_BUDGET_USD`, an **LLM** spend cap independent of Comfy credits. Default **0**, which blocks all live calls.
+- **Before every live call**, the loop checks `spent + worst_case(call) ≤ cap`, where worst case = estimated input tokens × input price + `max_output_tokens` × output price, using a dated price table in `studio/agent/pricing.py`. After the call, actual usage is recorded: Gemini `total_input_tokens` / `total_output_tokens` / `total_thought_tokens`, with thoughts billed as output; Anthropic `input_tokens` / `output_tokens`. Gemini's free tier isn't assumed.
+- **Model verification:** before the first live call per process, the provider verifies the model ID (Gemini `client.models.get`, Anthropic `client.models.retrieve`) and refuses on failure. Not run in M3, since no live calls are authorised.
+- **Credentials:** `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` stay in env only. They never appear in threads, tool records, snapshots or logs; a test scans the data dir.
+
+### 6.7 Skill
+
+`skills/shot-direction.md`, read at `/skills/shot-direction`. It covers framing grammar and coverage (craft from `motionx-spike/skills/*.md`), the §6.3 field mapping, how H3 reads timed beats and "Image N", the rule that every review note becomes a concrete field change plus a proposal, and the boundary: propose, never approve. The system prompt lists only the skill index, the project header and the rules.
 
 ## 7. Workflow capabilities and input translation
 
@@ -302,7 +343,7 @@ take: queued ─► submitting* ─► submitted(job_id) ─► running ─► g
 **Stack.** Single process, single user, no cloud infrastructure other than Comfy:
 
 - Python 3.12 with FastAPI, Pydantic v2 and SQLite (stdlib `sqlite3` plus a small repository module).
-- `comfy-sdk` 0.5.0 and `comfy-api-proxy` 0.1.6 (both MIT), `httpx`, Pillow. `anthropic` is added in M3.
+- `comfy-sdk` 0.5.0 and `comfy-api-proxy` 0.1.6 (both MIT), `httpx`, Pillow. Agent SDKs: `google-genai` 2.31 (Gemini, the default live provider) and `anthropic` 1.15.
 - ComfyUI v0.42.1 (GPL-3.0, cloned into gitignored `runtime/` by `scripts/setup_comfy.sh`, never vendored) with torch 2.14.1, comfyui-frontend-package 1.55.18 and comfyui-workflow-templates 0.11.89.
 - Vite + React + TypeScript SPA, built to static files served by FastAPI.
 - `pytest` with a **FakeComfyAdapter** for tests and CI. It returns a bundled sample MP4 and the UI shows a "FAKE" banner.
@@ -331,7 +372,7 @@ Copying about 600 lines of patterns is cheaper and safer than untangling any of 
 | # | Decision | Default if no answer | Needed by |
 |---|---|---|---|
 | D1 | Further paid generation (e.g. the first real reference-to-video take, a real two-take revision) | none authorised; the app refuses paid approvals (1/1 used) | before M5 demo |
-| D2 | LLM for the agent: Anthropic API key and spend cap; the agent stays optional for repo users | Anthropic, Sonnet 5.5 default | Oct 23 |
+| D2 | First live agent run: Gemini key (`GEMINI_API_KEY`), model, and an LLM spend cap (`STUDIO_AGENT_BUDGET_USD`, default 0 = blocked) | none authorised; scripted provider only | before the M5 demo |
 | D3 | Public repo owner/name and licence | `motionx-shot-studio`, MIT (matches comfy-sdk and the templates) | before publishing, Oct 28 |
 | D4 | Demo material: which characters, locations and frames we have rights to show (no real likenesses without consent, no private MotionX footage) | CC0/stock or our own generated stills | Oct 24 |
 | D5 | Also enter **Open Weights Only** via the native H3 I2V template on Cloud? (licence for open-weights H3 on Cloud is UNVERIFIED) | no. Main category plus the MiniMax H3 bonus | Oct 26 |

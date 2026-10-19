@@ -42,6 +42,18 @@ class Settings:
     lease_s: float = 120.0
     charge_settle_s: float = 20.0     # Partner Node cost can post after the job ends: re-read balance
     charge_settle_attempts: int = 4   # ... this many times before leaving the charge "pending"
+    # -- agent (M3). Scripted is the development default; live providers are blocked while the
+    #    LLM budget is 0. The LLM budget is independent of Comfy credits.
+    agent_provider: str = "scripted"  # scripted | gemini | anthropic
+    agent_model: str = ""             # empty = provider default (gemini-3.8-flash / claude-opus-5-5)
+    agent_max_turns: int = 12
+    agent_max_output_tokens: int = 8000
+    agent_thinking: str = "low"       # Gemini thinking_level; Anthropic effort
+    agent_budget_usd: float = 0.0     # hard cap on estimated live LLM spend; 0 blocks live calls
+    gemini_api_key: str | None = field(default=None, repr=False)
+    gemini_vertex_project: str | None = None
+    gemini_vertex_location: str = "global"
+    anthropic_api_key: str | None = field(default=None, repr=False)
     fake_job_seconds: float = 3.0     # fake adapter: queued->running->succeeded duration
     fake_render: str = "ffmpeg"       # fake adapter: "ffmpeg" | "copy"
 
@@ -77,6 +89,16 @@ class Settings:
             sweep_interval_s=float(g("STUDIO_SWEEP_INTERVAL_S", "30")),
             charge_settle_s=float(g("STUDIO_CHARGE_SETTLE_S", "20")),
             charge_settle_attempts=int(g("STUDIO_CHARGE_SETTLE_ATTEMPTS", "4")),
+            agent_provider=g("STUDIO_AGENT_PROVIDER", "scripted"),
+            agent_model=g("STUDIO_AGENT_MODEL", ""),
+            agent_max_turns=int(g("STUDIO_AGENT_MAX_TURNS", "12")),
+            agent_max_output_tokens=int(g("STUDIO_AGENT_MAX_OUTPUT_TOKENS", "8000")),
+            agent_thinking=g("STUDIO_AGENT_THINKING", "low"),
+            agent_budget_usd=float(g("STUDIO_AGENT_BUDGET_USD", "0")),
+            gemini_api_key=g("GEMINI_API_KEY") or g("GOOGLE_API_KEY") or None,
+            gemini_vertex_project=g("STUDIO_GEMINI_VERTEX_PROJECT") or None,
+            gemini_vertex_location=g("STUDIO_GEMINI_VERTEX_LOCATION", "global"),
+            anthropic_api_key=g("ANTHROPIC_API_KEY") or None,
             fake_job_seconds=float(g("STUDIO_FAKE_JOB_SECONDS", "3")),
             fake_render=g("STUDIO_FAKE_RENDER", "ffmpeg"),
         )

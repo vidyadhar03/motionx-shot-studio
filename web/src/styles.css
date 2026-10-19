@@ -173,3 +173,31 @@ label.inline select { width: auto; }
 .ref-thumbs figure { margin: 0; }
 .ref-thumbs img { width: 72px; height: 72px; object-fit: cover; border-radius: 4px; }
 .ref-thumbs figcaption { font-size: 10px; color: var(--muted); text-align: center; }
+
+/* M3: agent */
+.agent-panel { float: right; width: 360px; margin: 0 0 18px 18px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 8px; position: sticky; top: 70px;
+  max-height: calc(100vh - 90px); }
+.agent-log { overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 6px; min-height: 160px; }
+.msg { padding: 8px 10px; border-radius: 8px; font-size: 13px; line-height: 1.45; white-space: pre-wrap; }
+.msg.user { background: #2a2416; align-self: flex-end; max-width: 90%; }
+.msg.assistant { background: var(--panel2); }
+.msg.notice { background: #33290f; color: var(--warn); font-size: 12px; }
+.msg.notice.error { background: #3a2622; color: var(--bad); }
+.call { border-left: 2px solid var(--line); padding: 4px 8px; font-size: 12px; }
+.call.write { border-left-color: var(--accent); }
+.call.propose_generation { border-left-color: var(--ok); }
+.call-head { display: flex; gap: 6px; align-items: center; }
+.call-head .path { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.call .err { color: var(--bad); }
+.call .diff { margin: 4px 0 0; padding-left: 14px; }
+.call .diff s { color: var(--muted); }
+.call .diff span { color: var(--ok); }
+.call-prop { margin-top: 4px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.agent-input textarea { font-size: 13px; }
+.pill.agent { background: #1f2a3a; color: var(--info); }
+.history { margin-top: 10px; font-size: 12px; }
+.history ul { margin: 6px 0; padding-left: 16px; }
+.decisions { margin-top: 10px; font-size: 12px; }
+.decision { margin: 3px 0; }
+@media (max-width: 1250px) { .agent-panel { float: none; width: auto; margin: 0 0 18px; position: static; max-height: none; } }

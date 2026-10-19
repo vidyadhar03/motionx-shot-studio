@@ -5,12 +5,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .compiler import PRESETS
+from .compiler import PRESETS, check_direction
 from .db import Database, dumps, new_id, now
 
 SHOT_FIELDS = ("scene", "order_idx", "title", "intention", "action", "framing", "camera_move", "lens_look",
                "lighting", "duration_s", "resolution", "seed", "start_frame_sha", "scene_id", "mode",
-               "aspect_ratio", "refs")
+               "aspect_ratio", "refs", "camera_detail", "audio")
+# What the agent may change. Files (start frame), output tier (resolution) and seed stay human-owned.
+AGENT_SHOT_FIELDS = ("title", "intention", "action", "framing", "camera_move", "camera_detail", "lens_look",
+                     "lighting", "audio", "duration_s", "mode", "aspect_ratio", "refs", "scene_id")
 SHOT_MODES = ("first_frame", "reference")
 ASSET_KINDS = ("character", "location", "prop")
 FEEDBACK_REASONS = ("identity", "composition", "motion", "camera", "lighting", "artifact", "timing", "other")
@@ -90,7 +93,13 @@ class Ops:
             if brief is not None:
                 c.execute("UPDATE projects SET brief=? WHERE id=?", (brief, pid))
             if direction is not None:
+                old = c.execute("SELECT direction FROM projects WHERE id=?", (pid,)).fetchone()["direction"]
                 c.execute("UPDATE projects SET direction=? WHERE id=?", (dumps(direction), pid))
+                if old != dumps(direction):
+                    # Every pending proposal compiled the old direction into its prompt.
+                    c.execute("UPDATE proposals SET status='stale', stale_reason='project direction changed' "
+                              "WHERE status='pending' AND shot_id IN (SELECT id FROM shots WHERE project_id=?)",
+                              (pid,))
         return self.get_project(pid)
 
     def get_project(self, pid: str) -> dict:
@@ -105,8 +114,10 @@ class Ops:
     # -- shots ---------------------------------------------------------------------------------
     def create_shot(self, pid: str, fields: dict[str, Any], author: str = "user") -> dict:
         self.get_project(pid)
+        self._check_author_fields(author, fields)
         clean = _validate_shot_patch(fields)
         self._check_links(pid, clean)
+        check_direction({"duration_s": 5, **clean})
         sid, ts = new_id("sht"), now()
         order = self.db.one("SELECT COALESCE(MAX(order_idx),0)+1 AS n FROM shots WHERE project_id=?", pid)["n"]
         clean.setdefault("order_idx", order)
@@ -122,17 +133,21 @@ class Ops:
     def update_shot(self, sid: str, patch: dict[str, Any], expected_revision: int, author: str = "user") -> dict:
         """Optimistic concurrency: a write based on a stale revision is refused, so a UI tab and the
         agent can never silently overwrite each other. Every accepted write is a new revision."""
+        self._check_author_fields(author, patch)
         clean = _validate_shot_patch(patch)
         with self.db.tx(immediate=True) as c:
             row = c.execute("SELECT * FROM shots WHERE id=?", (sid,)).fetchone()
             if not row:
                 raise NotFoundError(f"shot {sid} not found")
+            if author == "agent" and row["locked"]:
+                raise ConflictError(f"shot {sid} is locked by a person; the agent can only edit draft shots")
             if row["revision"] != expected_revision:
                 raise ConflictError(f"shot {sid} is at revision {row['revision']}, not {expected_revision}; "
                                     "reload and reapply your change")
             if not clean:
                 return self._shot_with_children(dict(row))
             self._check_links(row["project_id"], clean)
+            check_direction({**dict(row), **clean})
             rev, ts = row["revision"] + 1, now()
             sets = ", ".join(f"{k}=?" for k in clean)
             c.execute(f"UPDATE shots SET {sets}, revision=?, updated_at=? WHERE id=?", [*clean.values(), rev, ts, sid])
@@ -140,8 +155,50 @@ class Ops:
             c.execute("INSERT INTO shot_revisions(shot_id,revision,fields,author,at) VALUES (?,?,?,?,?)",
                       (sid, rev, dumps({k: new[k] for k in SHOT_FIELDS}), author, ts))
             # Any pending proposal was compiled from the old revision: it can no longer be approved.
-            c.execute("UPDATE proposals SET status='stale' WHERE shot_id=? AND status='pending'", (sid,))
+            c.execute("UPDATE proposals SET status='stale', stale_reason='shot changed (revision ' || ? || ')' "
+                      "WHERE shot_id=? AND status='pending'", (rev, sid))
         return self.get_shot(sid)
+
+    @staticmethod
+    def _check_author_fields(author: str, patch: dict[str, Any]) -> None:
+        if author == "agent":
+            denied = sorted(set(patch) - set(AGENT_SHOT_FIELDS))
+            if denied:
+                raise PermissionError(f"the agent may not set {', '.join(denied)}; allowed: "
+                                      f"{', '.join(AGENT_SHOT_FIELDS)}")
+
+    def set_locked(self, sid: str, locked: bool) -> dict:
+        """Human-only: a locked shot refuses agent writes."""
+        self.get_shot_row(sid)
+        with self.db.tx() as c:
+            c.execute("UPDATE shots SET locked=? WHERE id=?", (int(locked), sid))
+        return self.get_shot(sid)
+
+    def list_revisions(self, sid: str) -> list[dict]:
+        """Revision history with a per-field diff against the previous revision, newest first."""
+        rows = self.db.all("SELECT * FROM shot_revisions WHERE shot_id=? ORDER BY revision", sid)
+        out, prev = [], None
+        for r in rows:
+            fields = json.loads(r["fields"])
+            diff = {} if prev is None else {k: {"from": prev.get(k), "to": v} for k, v in fields.items()
+                                             if prev.get(k) != v}
+            out.append({"revision": r["revision"], "author": r["author"], "at": r["at"], "diff": diff})
+            prev = fields
+        return list(reversed(out))
+
+    # -- decisions (people record them; the agent reads them) ---------------------------------
+    def add_decision(self, pid: str, text: str, by: str = "user") -> dict:
+        self.get_project(pid)
+        if not text.strip():
+            raise ValueError("decision text is required")
+        did = new_id("dec")
+        with self.db.tx() as c:
+            c.execute("INSERT INTO decisions(id,project_id,text,decided_by,at) VALUES (?,?,?,?,?)",
+                      (did, pid, text.strip(), by, now()))
+        return self.db.one("SELECT * FROM decisions WHERE id=?", did)
+
+    def list_decisions(self, pid: str) -> list[dict]:
+        return self.db.all("SELECT * FROM decisions WHERE project_id=? ORDER BY at", pid)
 
     def _check_links(self, pid: str, clean: dict[str, Any]) -> None:
         """Scenes and asset versions must belong to the shot's own project."""

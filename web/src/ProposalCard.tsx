@@ -21,9 +21,10 @@ export default function ProposalCard({ proposal: p, status, onDone, onError }: {
     <section className={`proposal ${p.status}`}>
       <div className="section-title">
         Generation proposal <span className={`pill ${p.status}`}>{p.status}</span>
-        <span className="muted">by {p.created_by}{p.parent_take_id ? " · revision" : ""}</span>
+        <span className={p.created_by === "agent" ? "pill agent" : "muted"}>by {p.created_by}</span>
+        {p.parent_take_id && <span className="muted">revision</span>}
       </div>
-      {p.status === "stale" && <div className="banner warn">The shot changed after this proposal was made. Propose again to approve the current version.</div>}
+      {p.status === "stale" && <div className="banner warn">This proposal is stale: {p.stale_reason ?? "its inputs changed"}. Propose again to approve the current version.</div>}
       <div className="proposal-body">
         {frame && <img className="thumb" src={media(frame.sha256)} alt="start frame" />}
         {isRef && (
