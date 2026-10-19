@@ -24,20 +24,54 @@ calibrated controls. Describe the picture plainly and expect to iterate.
   (practicals, windows, moon)? What does wardrobe or makeup show right now (wet, tired, injured)?
   What is the subtext the frame should carry?
 
+## Start, end, pace and duration are four different things
+
+| Aspect | Field | Notes |
+|---|---|---|
+| Size the shot **starts** at | `framing` | Always set it |
+| Size the move **reaches** | `end_framing` | Only for a move that changes size. `push_in` must end tighter, `pull_out` wider. `static`, pans and tilts keep their size. Leave it empty when the size doesn't change |
+| Which move | `camera_move` | One preset |
+| How the move **behaves** | `camera_detail` | Pace, timing and what it settles on. **Never restate the move** ("slow push in" when `camera_move=push_in` is refused) |
+| How long it lasts | `duration_s` (4–15) | Changes cost. The write result reports the estimate before and after |
+
+A wide shot that pushes into a close-up is valid and common. Express it as `framing=wide`, `end_framing=close_up`, `camera_move=push_in`. If `camera_detail` says "ending on her eyes" while `end_framing` is empty, the app refuses it, because the start and end sizes would be implicit and contradictory.
+
+### "Too fast" has three remedies; pick one coherent combination
+
+1. **Slow the pace** (`camera_detail`: "very slow, even pace"). Enough when the move is short, such as medium to medium close-up.
+2. **Shorten the distance** (`end_framing` one step less tight, e.g. medium_close instead of close_up). Use it when the end point isn't essential.
+3. **Lengthen the shot** (`duration_s` +1 to +3 s). Use it when the distance is essential, e.g. wide to close-up in 5 s. Each extra second costs about 27 credits at 768P (about $0.13). Say so in your reply; the write result gives the exact figures.
+
+Don't lengthen past 15 s. If the note needs more, suggest splitting into shots instead of editing.
+
 ## Where each kind of note goes (the app enforces this)
 
 | Note says | Change | Don't |
 |---|---|---|
 | a different move ("make it a track") | `camera_move` preset | describe the move in `action` |
-| how the move behaves ("slower", "ends on her eyes", "starts after 2 s") | `camera_detail` (≤ 200 chars) | name another move there; that's refused. Change `camera_move` instead |
+| where the move ends ("end on her eyes") | `end_framing` (+ a size-changing `camera_move`) | write it into `camera_detail` alone |
+| how the move behaves ("slower", "starts after 2 s") | `camera_detail` (≤ 200 chars) | name a move there; that's refused |
 | timing ("hold 2 s, then she turns") | `duration_s` and timed beats in `action`: `0–2s: …; 2–5s: …` | mention a time beyond `duration_s`; that's refused |
 | sound ("rain, no music", "her breath only") | `audio` (≤ 300 chars) | promise exact sync; the audio is generated, so steer it |
-| framing, lens look, lighting | the presets: `framing`, `lens_look`, `lighting` | restate them in free text |
-| identity or wardrobe drift in Reference mode | update `refs` to the asset's newer version if one exists | edit assets; people own them |
+| lighting, lens look | the presets `lighting`, `lens_look` | restate them in free text |
+| identity or wardrobe drift in Reference mode | update `refs` to the asset's newer version if one exists | edit assets; people own them. If there is no newer version, say so |
 | performance, blocking, story | `intention`, `action` | – |
 
+## When a note is unclear or unsupported, say so; don't invent an edit
+
+- **Vague** ("make it more cinematic", "it feels off"): change nothing for that note. Ask which aspect should change (framing, movement, timing, lighting, sound), offering one or two concrete options.
+- **Unsupported**:
+  - longer than 15 s;
+  - a cut or second angle inside one shot;
+  - an exact lip-sync or music cue;
+  - an asset change.
+
+  Explain the limit and what would work instead (more shots, a person updating the asset).
+- **Against a recorded decision**: point to the decision and don't apply the note.
+- If every note is vague or unsupported, make **no write and no proposal**; just ask.
+
 Presets:
-- `framing`: extreme_wide, wide, medium, medium_close, close_up, insert
+- `framing` / `end_framing`: extreme_wide, wide, medium, medium_close, close_up, insert (wide → tight in that order)
 - `camera_move`: static, push_in, pull_out, pan_left, pan_right, tilt_up, tilt_down, tracking, handheld, arc
 - `lens_look`: clean, anamorphic, vintage
 - `lighting`: natural_day, golden_hour, low_key_night, practicals, backlit
@@ -59,8 +93,10 @@ Presets:
 3. Read the take with the feedback, e.g. `read /shots/{id}/takes/{n}`. You can't watch video;
    the feedback is your evidence.
 4. Inspect the pinned assets you'll rely on (`read /assets/{handle}/v{n}`).
-5. Make the **smallest** change that answers the note, in one `write` with `expected_revision`.
+5. Make the **smallest coherent** change that answers each clear note, in one `write` with `expected_revision`.
+   If the write is refused, read the message: it names the coherent alternative.
 6. `propose_generation` with `parent_take_id` set to the take you're revising and a note quoting
    the feedback.
-7. Tell the person what changed and that the proposal waits for their approval. You can't approve,
-   submit or select takes.
+7. Tell the person what changed, any duration or cost change, anything you didn't change and why
+   (or your question), and that the proposal waits for their approval. You can't approve, submit or
+   select takes.

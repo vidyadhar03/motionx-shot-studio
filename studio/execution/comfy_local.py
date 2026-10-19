@@ -186,6 +186,20 @@ class ComfyLocalAdapter:
         except (httpx.HTTPError, ComfyError) as e:
             raise ProviderTransientError(_safe(e)) from None
 
+    def cancel(self, job_id: str) -> str:
+        """comfy-api-proxy POST /api/v2/jobs/{id}/cancel -> ComfyUI POST /api/jobs/{id}/cancel, which interrupts only
+        if that prompt is still the running one (interrupt_if_running) or dequeues it if pending. Never /interrupt."""
+        from comfy_sdk import CancelRefused
+        try:
+            self._comfy().jobs.get(job_id).cancel()
+            return "requested"
+        except NotFound:
+            return "unknown_job"
+        except CancelRefused:
+            return "refused"
+        except (httpx.HTTPError, ComfyError) as e:
+            raise ProviderTransientError(_safe(e)) from None
+
     def recent_jobs(self) -> list[dict[str, Any]]:
         try:
             r = httpx.get(f"{self.base_url}/api/v2/jobs", params={"limit": 20}, timeout=10)

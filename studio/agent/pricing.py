@@ -22,6 +22,33 @@ PRICES: dict[str, list[tuple[date, float, float]]] = {
 }
 
 
+# How est_usd was calculated. "documented" = stated in official docs; "inferred" = our reading, not confirmed.
+CALC_METHODS: dict[str, dict[str, str]] = {
+    "none": {"certainty": "no_charge", "formula": "scripted provider: no network call"},
+    "gemini.v1": {
+        "certainty": "incomplete",
+        "formula": "total_input_tokens x input + (total_output_tokens + total_thought_tokens) x output",
+        "caveat": "total_tool_use_tokens, total_tokens and the modality breakdown were NOT recorded for these rows; "
+                  "function-result content appears to be reported outside total_input_tokens, so this may "
+                  "understate the charge. Not reconstructed.",
+    },
+    "gemini.v2": {
+        "certainty": "calculated_conservative",
+        "formula": "max(total_input_tokens + total_tool_use_tokens, total_tokens - output - thought) x input + "
+                   "(total_output_tokens + total_thought_tokens) x output",
+        "documented": "thinking billed at the output price; image tokens are part of input; thoughts reported "
+                      "separately from output (total = input + output + thought)",
+        "inferred": "that total_tool_use_tokens are billed as input for client function calls (the field is "
+                    "documented, its billing is not); cached input charged at the full rate (overstates)",
+    },
+    "anthropic.v1": {
+        "certainty": "calculated_conservative",
+        "formula": "(input + cache_read + cache_creation) x input + output x output",
+        "inferred": "cache reads charged at the full input rate (overstates)",
+    },
+}
+
+
 class UnknownPrice(LookupError):
     pass
 

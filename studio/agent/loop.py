@@ -114,7 +114,8 @@ class AgentRunner:
             est = pricing.usd(provider.model, t.usage.input_tokens, t.usage.billable_output) if provider.live else 0.0
             self.store.record_usage(thread_id, provider.name, provider.model, t.usage.input_tokens,
                                     t.usage.billable_output, est, provider.live, thought_tokens=t.usage.thought_tokens,
-                                    pre_estimate_usd=pre, raw_usage=t.usage.raw)
+                                    pre_estimate_usd=pre, raw_usage=t.usage.raw,
+                                    calc_method=getattr(provider, "calc_method", None))
             if pre is not None and est > pre:
                 # The pre-call figure is an estimate, not a bound; if reality exceeded it, stop and report.
                 self.store.append_items(thread_id, t.items)

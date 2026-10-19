@@ -20,6 +20,13 @@ export default function TakeCard({ take: t, shot, reasons, comparing, onCompare,
   const [note, setNote] = useState("");
   const [jobId, setJobId] = useState("");
   const [candidates, setCandidates] = useState<{ id: string; status: string }[] | null>(null);
+  const [cancelMsg, setCancelMsg] = useState<string | null>(null);
+  const cancellable = ["queued", "submitting", "submitted", "running", "poll_timeout", "submission_unknown"].includes(t.state);
+  const cancelWarning = t.state === "queued"
+    ? "Cancel before submission? Nothing has been sent; the credit reservation will be released."
+    : "Request cancellation? The job may already be running at the provider. The app will ask the backend to cancel this job only; charges may still apply and no refund is implied. The take stays tracked.";
+  const cancel = () => confirm(cancelWarning) &&
+    api.cancelTake(t.id).then((r) => { setCancelMsg(r.message); onChanged(); }).catch(onError);
   const run = (p: Promise<unknown>) => p.then(onChanged).catch(onError);
   const meta = t.output_meta?.saved;
   const total = secs(t.created_at, t.finished_at);
@@ -34,7 +41,11 @@ export default function TakeCard({ take: t, shot, reasons, comparing, onCompare,
         <span className={`pill ${t.state}`}>{ACTIVE.has(t.state) && <i className="spin" />}{LABEL[t.state] ?? t.state}</span>
         {t.adapter === "fake" && <span className="pill fake">FAKE</span>}
         {selected && <span className="pill selected">selected</span>}
+        {cancellable && <button className="small ghost danger" onClick={cancel}>Cancel</button>}
       </header>
+      {(cancelMsg || t.cancel_outcome) && (
+        <div className="banner warn">{cancelMsg ?? `Cancel: ${t.cancel_outcome?.replace(/_/g, " ")}`}</div>
+      )}
 
       {t.output_sha ? (
         <video src={`/api/media/${t.output_sha}`} controls loop playsInline preload="metadata" />

@@ -30,7 +30,7 @@ def make_settings(tmp: Path, **over) -> Settings:
     env = {"STUDIO_DATA_DIR": str(tmp), "STUDIO_WORKFLOWS_DIR": str(ROOT / "workflows"),
            "STUDIO_ADAPTER": "fake", "STUDIO_POLL_INTERVAL_S": "0.05", "STUDIO_FAKE_JOB_SECONDS": "0.3",
            "STUDIO_FAKE_RENDER": "copy", "STUDIO_SWEEP_INTERVAL_S": "0.2",
-           "STUDIO_CHARGE_SETTLE_S": "0"}
+           "STUDIO_CHARGE_SETTLE_S": "0", "STUDIO_BUDGET_CREDITS": "700", "STUDIO_MAX_PAID_ATTEMPTS": "5"}
     env.update({k: str(v) for k, v in over.items()})
     return Settings.from_env(env)
 

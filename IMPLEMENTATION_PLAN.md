@@ -31,7 +31,7 @@ No `AGENTS.md` or `CLAUDE.md` exists in spike, video-harness, locvis or location
 | **M1** | Tue 20 – Thu 22 | Vertical slice: upload frame → shot → proposal → approval → take → feedback → second take, both retained | **Done.** The revision flow (feedback → second take → compare) is verified with **fake outputs**. Only **one real take** exists; a real second take hasn't been run |
 | **M2** | Fri 23 – Sat 24 | Project-scoped Character/Location/Prop assets with immutable versions, scenes, the reference path (`h3_reference` via `MinimaxHailuo03ReferenceNode`, 1–9 images, "Image N" binding), capability errors in the UI | **Done (2026-10-20) on the fake adapter plus offline ComfyUI graph validation.** No real reference-to-video generation has run (§5b) |
 | **M3** | Sun 25 – Mon 26 | Agent: one loop, 4 project-scoped tools, `skills/shot-direction.md`, persisted threads and tool ledger; providers scripted (dev default), **Gemini (default live)**, Anthropic; LLM spend cap | **Done (2026-10-20) with the scripted provider and mocked SDK tests.** No live LLM call has been made (§5c) |
-| **M4** | Tue 27 – Wed 28 | Export (selected MP4s + manifest), cancel, README check from a clean clone | Planned |
+| **M4** | Tue 27 – Wed 28 | Export (selected takes + manifest), cancellation, README check from a clean clone, direction fixes from the live test, LLM cost accounting | **Done (2026-10-20) offline:** fake video, scripted agent, mocked SDKs (§5d). No paid or live calls |
 | **M5** | Thu 29 | Demo project with licensed inputs, demo video, publish (needs approval), submit | Planned |
 
 ## 3. Local execution setup (verified 2026-10-20)
@@ -198,6 +198,25 @@ Fixed offline before or after the run:
 - Real token usage and cost against the estimate; the input estimate is a rough chars/3.5 + 1,600 per image.
 - The Anthropic adapter live; mocked only.
 - All of the above on real video: no paid generation was run in M3, and the reference path is still unverified against H3.
+
+## 5d. M4 results (offline only: fake video, scripted agent, mocked SDKs; no live or paid calls)
+
+| Area | Files |
+|---|---|
+| Cancellation: atomic pre-dispatch cancel, job-scoped remote cancel, idempotent; scheduling routes made async (fixes a latent "no running event loop" crash in resume/resolve) | `studio/generation.py`, `studio/execution/{base,comfy_local,fake}.py`, `studio/api.py` |
+| Export ZIP + `motionx.export/1` manifest, hash verification, sanitiser | `studio/export.py`, `studio/api.py`, `web/src/ProjectPanel.tsx` |
+| Direction: `end_framing`, size/move coherence, no preset repetition, tight-ending check, cost impact of duration changes; scripted rules explain or ask instead of inventing edits | `studio/compiler.py`, `studio/ops.py`, `studio/agent/tools.py`, `studio/agent/providers/scripted.py`, `skills/shot-direction.md` |
+| Accounting: `calc_method` per usage row, confirmed-billing table, accounting API and UI; first live run labelled `gemini.v1` (incomplete), never recomputed | `studio/agent/{pricing,store,loop}.py`, `studio/db.py`, `web/src/AgentPanel.tsx` |
+| Tests | `tests/test_m4_cancel.py` (8), `tests/test_m4_export.py` (5), `tests/test_m4_direction.py` (17), accounting in `tests/test_m3_agent.py` (+3). **Total 109 passed** |
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Cancel before dispatch releases the reservation and never submits; a cancel-vs-dispatch race (25 runs) always has exactly one winner | ✅ |
+| 2 | Cancel during submission → recorded, sent once a job exists; while running → job-scoped request, confirmed only by a later `canceled` status; ignored cancel → output saved, spend kept; repeated requests idempotent | ✅ fake adapter; Comfy adapter call shape checked with a mock (`jobs.get(id).cancel()`, no global interrupt) |
+| 3 | Export order, exact snapshots, pinned versions (historical v1 after the asset moved to v2), parent take ids, cost certainty, missing-shot reasons, byte-identical stored files, hash re-verification, tamper → 409, no secrets or absolute paths | ✅ tests and browser download (2 files + manifest, hashes OK, 1 missing shot reported) |
+| 4 | Live-run issues: "Slow push in, ending tightly on her eyes" is now refused with guidance; wide→close-up expressed via `end_framing`; "too fast" on a long move → slower pace + 5→7 s with a cost note (+54.3 cr); vague or unsupported notes → no write, a question or explanation | ✅ **offline only**. Whether a live model follows the updated skill is untested |
+| 5 | Accounting: reported / calculated / confirmed separated; first-run rows unchanged and labelled incomplete; new rows keep raw tool-use, modality and reasoning fields | ✅ tests; live-test data migrated (usage rows byte-compared before and after) |
+| 6 | Clean checkout: install, UI build, tests and fake-mode start without credentials, data or runtime | see §5e |
 
 ## 6. Main risks
 

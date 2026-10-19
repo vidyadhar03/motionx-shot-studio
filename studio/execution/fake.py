@@ -12,6 +12,8 @@ Behaviour per submission comes from a script (a list consumed in order, then `de
   fail                job runs, then fails (provider error)
   download_fail_once  job succeeds; the first download raises OutputUnavailable
   never_finishes      job stays running forever (poll-deadline testing)
+  cancel_ignored      the backend accepts a cancel request but the job still succeeds
+  slow_submit         submit() blocks until `release_submit` is set (cancel-during-submission races)
 """
 from __future__ import annotations
 
@@ -43,6 +45,8 @@ class FakeAdapter:
         self.job_seconds, self.render = job_seconds, render
         self.script, self.default = list(script or []), default
         self.submit_calls: list[str] = []       # idempotency keys seen, for tests
+        self.cancel_calls: list[str] = []
+        self.release_submit = threading.Event()
         self._lock = threading.Lock()
         state_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -74,6 +78,9 @@ class FakeAdapter:
         with self._lock:
             self.submit_calls.append(idempotency_key)
             behaviour = self.script.pop(0) if self.script else self.default
+        if behaviour == "slow_submit":
+            self.release_submit.wait(10)
+        with self._lock:
             state = self._load()
             if idempotency_key in state["keys"]:
                 raise SubmissionOutcomeUnknown("idempotency key already claimed")
@@ -95,6 +102,8 @@ class FakeAdapter:
         if job is None:
             return JobState(status="lost", error="fake: unknown job id")
         age = time.time() - job["created"]
+        if job.get("canceled"):
+            return JobState(status="canceled", error="canceled at the backend")
         if job["behaviour"] == "never_finishes":
             return JobState(status="running")
         if age < self.job_seconds / 3:
@@ -132,6 +141,19 @@ class FakeAdapter:
                     # Append the seed so different takes never collapse onto one content hash.
                     return out.read_bytes()
         return SAMPLE_VIDEO.read_bytes() + f"\nfake-seed:{request.get('seed')}".encode()
+
+    def cancel(self, job_id: str) -> str:
+        with self._lock:
+            self.cancel_calls.append(job_id)
+            state = self._load()
+            job = state["jobs"].get(job_id)
+            if job is None:
+                return "unknown_job"
+            finished = time.time() - job["created"] >= self.job_seconds and job["behaviour"] != "never_finishes"
+            if job["behaviour"] != "cancel_ignored" and not finished:
+                job["canceled"] = True
+                self._save(state)
+            return "requested"
 
     def recent_jobs(self) -> list[dict[str, Any]]:
         jobs = self._load()["jobs"]

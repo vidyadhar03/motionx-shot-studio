@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, Decision, Direction, Project } from "./api";
+import { api, Decision, Direction, ExportPreview, Project } from "./api";
 
 export default function ProjectPanel({ project, onSaved, onError }: {
   project: Project; onSaved: (p: Project) => void; onError: (e: unknown) => void;
@@ -9,6 +9,8 @@ export default function ProjectPanel({ project, onSaved, onError }: {
   const [dir, setDir] = useState<Direction>(project.direction);
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [decision, setDecision] = useState("");
+  const [exp, setExp] = useState<ExportPreview | null>(null);
+  const preview = () => api.exportPreview(project.id).then(setExp).catch(onError);
   useEffect(() => { setBrief(project.brief); setDir(project.direction); }, [project.id, project.brief, project.direction]);
   useEffect(() => { api.decisions(project.id).then(setDecisions).catch(onError); }, [project.id, onError]);
   const addDecision = () => api.addDecision(project.id, decision).then((d) => { setDecisions([...decisions, d]); setDecision(""); }).catch(onError);
@@ -41,6 +43,21 @@ export default function ProjectPanel({ project, onSaved, onError }: {
           <p className="hint">Changing direction makes pending proposals stale, because their prompts used the old direction.</p>
         </div>
       )}
+      <div className="export">
+        <button className="small" onClick={preview}>Export selected takes…</button>
+        {exp && (
+          <div className="export-preview">
+            <div className="asset-kind">Export (manifest {exp.manifest_version})</div>
+            {exp.included.map((i) => <div key={i.shot.id} className="ok">✓ {i.scene?.name ?? "No scene"} · {i.shot.title} · take {i.take}
+              <span className="muted"> ({i.cost === "no_charge" ? "fake" : i.cost.replace(/_/g, " ")})</span></div>)}
+            {exp.missing.map((m) => <div key={m.shot.id} className="miss">✗ {m.scene?.name ?? "No scene"} · {m.shot.title}: {m.reason}</div>)}
+            {exp.included.length > 0
+              ? <a className="button-link" href={api.exportUrl(project.id)} download>Download ZIP ({exp.included.length} file{exp.included.length === 1 ? "" : "s"} + manifest.json)</a>
+              : <p className="hint">Select a successful take on a shot to export it.</p>}
+            <p className="hint">Byte-identical files, ordered by scene and shot. Files are verified against their recorded hashes. No credentials, local paths or agent conversations are included.</p>
+          </div>
+        )}
+      </div>
       <div className="decisions">
         <div className="asset-kind">Decisions</div>
         {decisions.map((d) => <div key={d.id} className="decision">• {d.text}</div>)}

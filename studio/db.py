@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS shots (
   camera_detail TEXT NOT NULL DEFAULT '',        -- qualifies camera_move ("very slow, ends on her eyes")
   audio TEXT NOT NULL DEFAULT '',                -- sound direction ("rain on cobbles, no music")
   locked INTEGER NOT NULL DEFAULT 0,             -- 1 = human-locked: agent writes refused
+  end_framing TEXT,                              -- framing the move reaches by the end (NULL = unchanged)
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -150,6 +151,8 @@ CREATE TABLE IF NOT EXISTS takes (
   observed_credits REAL,
   error TEXT,
   review TEXT NOT NULL DEFAULT 'unreviewed',      -- unreviewed | approved | rejected
+  cancel_requested_at TEXT,                        -- set once; repeated requests are idempotent
+  cancel_outcome TEXT,                             -- canceled_before_submission | requested | remote_* | ...
   lease_until REAL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -224,10 +227,23 @@ CREATE TABLE IF NOT EXISTS agent_usage (
   thought_tokens INTEGER NOT NULL DEFAULT 0,   -- the thinking part of output_tokens (reported separately by Gemini)
   pre_estimate_usd REAL,            -- pre-call estimate (NOT a guaranteed bound)
   raw_usage TEXT,                   -- provider usage object as reported (JSON)
+  calc_method TEXT,                 -- which formula produced est_usd (see studio/agent/pricing.py CALC_METHODS)
   est_usd REAL NOT NULL,            -- calculated from reported usage at list price; not a billing record
   live INTEGER NOT NULL,
   at TEXT NOT NULL
 );
+-- Confirmed provider charges, entered by a person from the provider's billing console. Never inferred.
+CREATE TABLE IF NOT EXISTS agent_billing (
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  period TEXT NOT NULL,             -- e.g. "2026-10-20" or "2026-10"
+  amount_usd REAL NOT NULL,
+  source TEXT NOT NULL,             -- where the figure was read (console page, invoice id)
+  note TEXT NOT NULL DEFAULT '',
+  entered_by TEXT NOT NULL,
+  at TEXT NOT NULL
+);
+
 CREATE TRIGGER IF NOT EXISTS agent_messages_append_only
 BEFORE UPDATE ON agent_messages
 BEGIN SELECT RAISE(ABORT, 'agent history is append-only'); END;
@@ -284,10 +300,12 @@ class Database:
                   ("refs", "TEXT NOT NULL DEFAULT '[]'"),
                   ("camera_detail", "TEXT NOT NULL DEFAULT ''"),
                   ("audio", "TEXT NOT NULL DEFAULT ''"),
-                  ("locked", "INTEGER NOT NULL DEFAULT 0")],
+                  ("locked", "INTEGER NOT NULL DEFAULT 0"),
+                  ("end_framing", "TEXT")],
+        "takes": [("cancel_requested_at", "TEXT"), ("cancel_outcome", "TEXT")],
         "proposals": [("context", "TEXT"), ("context_hash", "TEXT"), ("stale_reason", "TEXT")],
         "agent_usage": [("thought_tokens", "INTEGER NOT NULL DEFAULT 0"), ("pre_estimate_usd", "REAL"),
-                        ("raw_usage", "TEXT")],
+                        ("raw_usage", "TEXT"), ("calc_method", "TEXT")],
     }
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
@@ -298,6 +316,13 @@ class Database:
             for name, decl in cols:
                 if name not in existing:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+        if {r[1] for r in conn.execute("PRAGMA table_info(agent_usage)")} >= {"calc_method", "raw_usage"}:
+            # Label (never recompute) rows written before calc methods existed. Live rows without raw usage are
+            # the first Gemini run, whose tool-use/total fields were not recorded.
+            conn.execute("UPDATE agent_usage SET calc_method='gemini.v1' WHERE calc_method IS NULL AND live=1 "
+                         "AND provider='gemini' AND raw_usage IS NULL")
+            conn.execute("UPDATE agent_usage SET calc_method='none' WHERE calc_method IS NULL AND live=0")
+            conn.commit()
 
     def connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=30, isolation_level=None)

@@ -88,6 +88,7 @@ def check_no_retries(client: Any) -> None:
 class GeminiProvider:
     name = "gemini"
     live = True
+    calc_method = "gemini.v2"
 
     def __init__(self, *, model: str | None = None, api_key: str | None = None, vertex_project: str | None = None,
                  vertex_location: str = "global", thinking_level: str = "low", client: Any = None):

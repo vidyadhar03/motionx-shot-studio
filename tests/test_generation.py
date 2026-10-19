@@ -262,3 +262,13 @@ def test_partner_key_never_reaches_database_or_snapshot(tmp_path):
         if f.is_file():
             assert secret.encode() not in f.read_bytes(), f
     assert secret not in repr(w.settings)
+
+
+def test_paid_video_is_disabled_by_default(tmp_path):
+    from studio.config import Settings
+    s = Settings.from_env({"STUDIO_DATA_DIR": str(tmp_path)})
+    assert s.adapter == "fake" and s.budget_credits == 0 and s.max_paid_attempts == 0
+    assert s.agent_provider == "scripted" and s.agent_budget_usd == 0 and s.agent_max_live_requests == 0
+    w = World(tmp_path / "w", paid=True, COMFY_API_KEY="comfyui-test", STUDIO_BUDGET_CREDITS=0, STUDIO_MAX_PAID_ATTEMPTS=0)
+    with pytest.raises(BudgetError, match="paid generation is disabled"):
+        w.service.approve(w.service.create_proposal(w.shot()["id"])["id"])

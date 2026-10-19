@@ -33,8 +33,8 @@ class Settings:
     comfy_base_url: str               # comfy-api-proxy in front of local ComfyUI
     comfyui_url: str                  # the ComfyUI behind it (version probe only)
     comfy_api_key: str | None = field(default=None, repr=False)   # Partner Node key
-    budget_credits: float = 700.0     # hard cap on paid spend (reserved + observed)
-    max_paid_attempts: int = 5        # hard cap on paid submissions
+    budget_credits: float = 0.0       # hard cap on paid spend (reserved + observed); 0 = paid video disabled
+    max_paid_attempts: int = 0        # hard cap on paid submissions; 0 = paid video disabled
     max_running: int = 1
     poll_interval_s: float = 5.0
     poll_deadline_s: float = 1800.0   # local patience per worker run; NOT a provider failure
@@ -83,8 +83,8 @@ class Settings:
             comfy_base_url=g("COMFY_BASE_URL", "http://127.0.0.1:8189"),
             comfyui_url=g("COMFYUI_URL", "http://127.0.0.1:8188"),
             comfy_api_key=g("COMFY_API_KEY") or None,
-            budget_credits=float(g("STUDIO_BUDGET_CREDITS", "700")),
-            max_paid_attempts=int(g("STUDIO_MAX_PAID_ATTEMPTS", "5")),
+            budget_credits=float(g("STUDIO_BUDGET_CREDITS", "0")),
+            max_paid_attempts=int(g("STUDIO_MAX_PAID_ATTEMPTS", "0")),
             max_running=int(g("STUDIO_MAX_RUNNING", "1")),
             poll_interval_s=float(g("STUDIO_POLL_INTERVAL_S", "5")),
             poll_deadline_s=float(g("STUDIO_POLL_DEADLINE_S", "1800")),

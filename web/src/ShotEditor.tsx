@@ -13,7 +13,7 @@ const fromShot = (s: Shot): Draft => ({
   title: s.title, intention: s.intention, action: s.action, framing: s.framing, camera_move: s.camera_move,
   lens_look: s.lens_look, lighting: s.lighting, duration_s: s.duration_s, resolution: s.resolution, seed: s.seed,
   start_frame_sha: s.start_frame_sha, scene_id: s.scene_id, mode: s.mode, aspect_ratio: s.aspect_ratio,
-  camera_detail: s.camera_detail ?? "", audio: s.audio ?? "",
+  camera_detail: s.camera_detail ?? "", audio: s.audio ?? "", end_framing: s.end_framing,
   refs: s.refs.map((r) => r.asset_version_id),
 });
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
@@ -178,7 +178,15 @@ export default function ShotEditor({ shot, presets, assets, scenes, revision, on
             ))}
           </div>
           <div className="row">
-            <label>Camera detail (how the move behaves)
+            <label>Ends at (framing the move reaches)
+              <select value={(draft.end_framing as string) ?? ""} onChange={(e) => set("end_framing", e.target.value)}
+                      title="Only for moves that change size: push in ends tighter, pull out ends wider">
+                <option value="">— same as start</option>
+                {presets.presets.framing.map((v) => <option key={v} value={v}>{presets.labels.framing[v]}</option>)}
+              </select></label>
+          </div>
+          <div className="row">
+            <label>Camera detail (pace / timing, not the move itself)
               <input value={(draft.camera_detail as string) ?? ""} placeholder={draft.camera_move ? "e.g. very slow, ending on her eyes" : "choose a camera move first"}
                      disabled={!draft.camera_move} onChange={(e) => set("camera_detail", e.target.value)} /></label>
             <label>Sound

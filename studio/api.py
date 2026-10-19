@@ -22,6 +22,7 @@ from .generation import BudgetError, GenerationService
 from .media import MediaError, MediaStore
 from .ops import FEEDBACK_REASONS, ConflictError, NotFoundError, Ops
 from .worker import Dispatcher
+from .export import Exporter, ExportIntegrityError
 from .agent.loop import AgentBudgetError, AgentRunner
 from .agent.providers.base import ProviderConfigError
 from .agent.store import AgentStore
@@ -147,6 +148,10 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     async def _us(_: Request, e: UnsupportedRequest):
         return err(422, e)
 
+    @app.exception_handler(ExportIntegrityError)
+    async def _ei(_: Request, e: ExportIntegrityError):
+        return err(409, e)
+
     @app.exception_handler(AgentBudgetError)
     async def _ab(_: Request, e: AgentBudgetError):
         return err(402, e)
@@ -197,6 +202,26 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     def get_project(pid: str) -> dict:
         return {**ops.get_project(pid), "shots": ops.list_shots(pid), "scenes": ops.list_scenes(pid)}
 
+    # -- export ---------------------------------------------------------------------------------
+    exporter = Exporter(ops, media)
+
+    @app.get("/api/projects/{pid}/export/preview")
+    def export_preview(pid: str) -> dict:
+        m = exporter.plan(pid)
+        return {"included": [{"scene": i["scene"], "shot": i["shot"], "take": i["take"]["number"],
+                              "file": i["file"]["path"], "cost": i["cost"]["certainty"]} for i in m["items"]],
+                "missing": m["missing"], "manifest_version": m["manifest_version"]}
+
+    @app.get("/api/projects/{pid}/export.zip")
+    def export_zip(pid: str):
+        from fastapi.responses import Response
+        data, m = exporter.build_zip(pid)
+        name = f"{m['project']['name'][:40].strip().replace(' ', '_') or 'project'}_selected_takes.zip"
+        name = "".join(ch for ch in name if ch.isalnum() or ch in "._-")
+        return Response(data, media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"',
+                                 "X-Export-Files": str(len(m["items"])), "X-Export-Missing": str(len(m["missing"]))})
+
     # -- decisions, lock, revision history --------------------------------------------------
     @app.get("/api/projects/{pid}/decisions")
     def list_decisions(pid: str) -> list[dict]:
@@ -226,6 +251,22 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
                 "max_turns": settings.agent_max_turns, "max_output_tokens": settings.agent_max_output_tokens,
                 "credentials": {"gemini": bool(settings.gemini_api_key or settings.gemini_vertex_project),
                                 "anthropic": bool(settings.anthropic_api_key)}}
+
+    @app.get("/api/agent/accounting")
+    def accounting() -> dict:
+        return agent.store.accounting()
+
+    class BillingIn(BaseModel):
+        provider: str
+        period: str
+        amount_usd: float
+        source: str
+        note: str = ""
+
+    @app.post("/api/agent/billing", status_code=201)
+    def confirm_billing(body: BillingIn) -> dict:
+        """Human-entered, from the provider's billing console. The app never infers a confirmed charge."""
+        return agent.store.confirm_billing(body.provider, body.period, body.amount_usd, body.source, body.note)
 
     @app.get("/api/projects/{pid}/agent/threads")
     def list_threads(pid: str) -> list[dict]:
@@ -341,9 +382,11 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     def review(tid: str, body: ReviewIn) -> dict:
         return ops.set_review(tid, body.review)
 
+    # Routes that schedule work must run on the event loop (async def); blocking work goes to a thread.
     @app.post("/api/takes/{tid}/resume")
-    def resume(tid: str) -> dict:
-        take = service.resume(tid)
+    async def resume(tid: str) -> dict:
+        import asyncio
+        take = await asyncio.to_thread(service.resume, tid)
         app.state.dispatcher.schedule(tid)
         return take
 
@@ -353,10 +396,19 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
         return {"jobs": adapter.recent_jobs()}
 
     @app.post("/api/takes/{tid}/resolve")
-    def resolve(tid: str, body: ResolveIn) -> dict:
-        take = service.resolve_unknown(tid, job_id=body.job_id, resubmit=body.resubmit)
+    async def resolve(tid: str, body: ResolveIn) -> dict:
+        import asyncio
+        take = await asyncio.to_thread(service.resolve_unknown, tid, job_id=body.job_id, resubmit=body.resubmit)
         app.state.dispatcher.schedule(tid)
         return take
+
+    @app.post("/api/takes/{tid}/cancel")
+    async def cancel_take(tid: str) -> dict:
+        import asyncio
+        out = await asyncio.to_thread(service.cancel, tid, "user")
+        if out["take"]["state"] in ("submitted", "running", "poll_timeout") and out["result"] == "remote_cancel_requested":
+            app.state.dispatcher.schedule(tid)          # make sure someone polls for the confirmation
+        return out
 
     @app.post("/api/takes/{tid}/reconcile")
     def reconcile(tid: str) -> dict:

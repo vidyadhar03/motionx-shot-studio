@@ -19,6 +19,7 @@ class ScriptedProvider:
     name = "scripted"
     model = "scripted-revise-v1"
     live = False
+    calc_method = "none"
     supports_tool_images = True
 
     def verify(self) -> None:
@@ -75,8 +76,10 @@ class ScriptedProvider:
                 calls = [("read", {"path": f"/shots/{sid}/start_frame"})]
             return self._calls(u, 3, calls, "Inspecting the shot's pinned assets.")
         notes = [f["note"] for f in take.get("feedback", []) if f.get("note")]
+        patch, said = derive_patch(shot, notes, refs, [results[k]["content"] for k in results if k.startswith(f"u{u}-p3-")])
         if phase == 4:
-            patch = derive_patch(shot, notes, refs, [results[k]["content"] for k in results if k.startswith(f"u{u}-p3-")])
+            if not patch:
+                return self._say("Scripted agent: I made no changes and created no proposal. " + " ".join(said))
             return self._calls(u, 4, [("write", {"path": f"/shots/{sid}", "patch": patch,
                                                  "expected_revision": shot["revision"]})],
                                "Applying the feedback to the draft shot.")
@@ -93,10 +96,13 @@ class ScriptedProvider:
         if "error" in prop:
             return self._say(f"Scripted agent: the proposal was refused ({prop['message']}).")
         changed = ", ".join(f"{k}" for k in write.get("changed", {})) or "nothing"
+        cost = write.get("changed", {}).get("duration_s", {}).get("cost_impact")
+        cost_text = (f" The duration change moves the estimate from {cost['est_credits_before']} to "
+                     f"{cost['est_credits_after']} credits ({cost['delta_credits']:+})." if cost else "")
         return self._say(f"Scripted agent: applied the feedback on take {take.get('number')} (changed {changed}; "
                          f"shot is now revision {write.get('revision')}) and created pending proposal "
-                         f"{prop.get('proposal_id')} (~{prop.get('est_credits')} credits on the real route). "
-                         "It needs your approval; I cannot approve or submit.")
+                         f"{prop.get('proposal_id')} (~{prop.get('est_credits')} credits on the real route).{cost_text} "
+                         + (" ".join(said) + " " if said else "") + "It needs your approval; I cannot approve or submit.")
 
     # -- helpers --------------------------------------------------------------------------------
     def _calls(self, u: int, phase: int, calls: list[tuple[str, dict]], text: str) -> Turn:
@@ -110,28 +116,59 @@ class ScriptedProvider:
                     usage=Usage(), stop="end", model=self.model)
 
 
-def derive_patch(shot: dict, notes: list[str], refs: list[dict], asset_reads: list[dict]) -> dict:
-    """Keyword rules mapping review notes onto fields (HLD §6.3). Deliberately simple and visible."""
-    # Separate notes so a phrase in one note never runs into the next.
-    text = ". ".join(n.strip().rstrip(".") for n in notes).lower()
+def derive_patch(shot: dict, notes: list[str], refs: list[dict], asset_reads: list[dict]) -> tuple[dict, list[str]]:
+    """Keyword rules mapping review notes onto fields (HLD §6.3, skill "shot-direction"). Deliberately simple and
+    visible. Returns (patch, things to tell the person). A note it cannot map is explained or turned into a
+    question; it never becomes an invented edit."""
+    from ...compiler import FRAMING_ORDER, SIZE_CHANGING_MOVES
     patch: dict[str, Any] = {}
-    if any(w in text for w in ("push in", "push-in", "slower", "too fast", "rushed")):
-        if "push" in text:
-            patch["camera_move"] = "push_in"
-        detail = "very slow, steady pace"
-        end = re.search(r"end(?:s|ing)? on ([^.;,]+)", text)
-        if end:
-            detail += f", ending on {end.group(1).strip()}"
-        if patch.get("camera_move") or shot.get("camera_move"):
-            patch["camera_detail"] = detail
-    sound = [n for n in notes if re.search(r"\b(sound|audio|rain|music|silence|ambience|footsteps)\b", n, re.I)]
-    if sound:
-        patch["audio"] = sound[-1].strip().rstrip(".")[:300]
-    if any(r["latest_version"] > r["pinned_version"] for r in refs) and \
-            any(w in text for w in ("identity", "coat", "costume", "wardrobe", "version", "update")):
-        latest = {a["handle"]: a for a in asset_reads if "versions" in a}
-        patch["refs"] = [{"asset_version_id": latest[r["handle"]]["versions"][0]["asset_version_id"]
-                          if r["handle"] in latest else r["asset_version_id"]} for r in refs]
-    if not patch and notes:
-        patch["action"] = (shot.get("action") or "").rstrip(".") + ". " + notes[-1].strip()
-    return patch
+    said: list[str] = []
+    framing, end, move = shot.get("framing"), shot.get("end_framing"), shot.get("camera_move")
+    duration = int(shot.get("duration_s") or 5)
+    for note in notes:
+        n = note.lower()
+        used = False
+        secs = [int(x) for x in re.findall(r"\b(\d+)\s*(?:s|sec|secs|seconds)\b", n)]
+        if secs and max(secs) > 15:
+            said.append(f'"{note}": a single H3 shot is 4-15 s, so I did not change the duration; split it into '
+                        "several shots instead.")
+            continue
+        if re.search(r"\b(cut to|then cut|two shots|split screen)\b", n):
+            said.append(f'"{note}": a shot is one continuous take; that needs a new shot, which I have not created.')
+            continue
+        if re.search(r"end(?:s|ing)? (?:on|in) (?:a )?(?:her|his|their)?\s*(?:eyes|face|close.?up)", n) and framing \
+                and FRAMING_ORDER[framing] < FRAMING_ORDER["close_up"]:
+            patch["end_framing"] = "close_up"
+            if (patch.get("camera_move") or move) not in SIZE_CHANGING_MOVES:
+                patch["camera_move"] = "push_in"
+            used = True
+        if "push in" in n or "push-in" in n:
+            if move != "push_in":
+                patch["camera_move"] = "push_in"
+            used = True
+        if any(w in n for w in ("too fast", "rushed", "slower")):
+            patch["camera_detail"] = "very slow, even pace"
+            target_end = patch.get("end_framing") or end
+            distance = FRAMING_ORDER[target_end] - FRAMING_ORDER[framing] if target_end and framing else 0
+            if distance >= 3 and duration < 8:
+                patch["duration_s"] = min(15, duration + 2)
+                said.append(f"I lengthened the shot from {duration}s to {patch['duration_s']}s so the {framing} to "
+                            f"{target_end} move can stay slow; this raises the generation estimate.")
+            used = True
+        if re.search(r"\b(sound|audio|rain|music|silence|ambience|footsteps)\b", n):
+            patch["audio"] = note.strip().rstrip(".")[:300]
+            used = True
+        if any(w in n for w in ("identity", "coat", "costume", "wardrobe", "version", "update")):
+            newer = [r for r in refs if r["latest_version"] > r["pinned_version"]]
+            if newer:
+                latest = {a["handle"]: a for a in asset_reads if "versions" in a}
+                patch["refs"] = [{"asset_version_id": latest[r["handle"]]["versions"][0]["asset_version_id"]
+                                  if r["handle"] in latest and r in newer else r["asset_version_id"]} for r in refs]
+            else:
+                said.append(f'"{note}": no newer asset version exists, so I could not update the reference; the '
+                            "asset itself has to be updated by a person.")
+            used = True
+        if not used:
+            said.append(f'"{note}": not specific enough for me to change a field. Should it change framing, '
+                        "movement, timing, lighting or sound?")
+    return patch, said

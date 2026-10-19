@@ -81,12 +81,48 @@ class AgentStore:
     # -- usage / spend ----------------------------------------------------------------------------
     def record_usage(self, tid: str, provider: str, model: str, input_tokens: int, output_tokens: int,
                      est_usd: float, live: bool, thought_tokens: int = 0, pre_estimate_usd: float | None = None,
-                     raw_usage: dict | None = None) -> None:
+                     raw_usage: dict | None = None, calc_method: str | None = None) -> None:
         with self.db.tx() as c:
             c.execute("INSERT INTO agent_usage(thread_id,provider,model,input_tokens,output_tokens,thought_tokens,"
-                      "pre_estimate_usd,raw_usage,est_usd,live,at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                      "pre_estimate_usd,raw_usage,calc_method,est_usd,live,at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                       (tid, provider, model, input_tokens, output_tokens, thought_tokens, pre_estimate_usd,
-                       dumps(raw_usage) if raw_usage else None, est_usd, int(live), now()))
+                       dumps(raw_usage) if raw_usage else None, calc_method, est_usd, int(live), now()))
+
+    def accounting(self) -> dict:
+        """Three separate things, never mixed: what providers reported, what we calculated (and how sure we
+        are), and what a person confirmed from a billing console."""
+        from .pricing import CALC_METHODS
+        rows = self.db.all("SELECT * FROM agent_usage WHERE live=1 ORDER BY id")
+        reported: dict[str, dict] = {}
+        for r in rows:
+            raw = json.loads(r["raw_usage"]) if r["raw_usage"] else {}
+            p = reported.setdefault(r["provider"], {"requests": 0, "raw_recorded": 0, "fields": {}})
+            p["requests"] += 1
+            p["raw_recorded"] += int(bool(raw))
+            for k, v in raw.items():
+                if isinstance(v, int):
+                    p["fields"][k] = p["fields"].get(k, 0) + v
+        calculated: dict[str, dict] = {}
+        for r in rows:
+            m = r["calc_method"] or "unlabelled"
+            c = calculated.setdefault(m, {"requests": 0, "usd": 0.0, **CALC_METHODS.get(m, {"certainty": "unknown"})})
+            c["requests"] += 1
+            c["usd"] = round(c["usd"] + r["est_usd"], 6)
+        confirmed = self.db.all("SELECT * FROM agent_billing ORDER BY at")
+        return {"reported": reported, "calculated": calculated,
+                "calculated_total_usd": round(sum(r["est_usd"] for r in rows), 6),
+                "confirmed": confirmed, "confirmed_total_usd": round(sum(c["amount_usd"] for c in confirmed), 6),
+                "status": "confirmed billing recorded" if confirmed else "no confirmed billing recorded"}
+
+    def confirm_billing(self, provider: str, period: str, amount_usd: float, source: str, note: str = "",
+                        by: str = "user") -> dict:
+        if amount_usd < 0 or not source.strip():
+            raise ValueError("a confirmed charge needs a non-negative amount and the source it was read from")
+        bid = new_id("bill")
+        with self.db.tx() as c:
+            c.execute("INSERT INTO agent_billing(id,provider,period,amount_usd,source,note,entered_by,at) "
+                      "VALUES (?,?,?,?,?,?,?,?)", (bid, provider, period, amount_usd, source.strip(), note, by, now()))
+        return self.db.one("SELECT * FROM agent_billing WHERE id=?", bid)
 
     def live_requests(self) -> int:
         return self.db.one("SELECT COUNT(*) AS n FROM agent_usage WHERE live=1")["n"]

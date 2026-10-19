@@ -10,9 +10,9 @@ from .db import Database, dumps, new_id, now
 
 SHOT_FIELDS = ("scene", "order_idx", "title", "intention", "action", "framing", "camera_move", "lens_look",
                "lighting", "duration_s", "resolution", "seed", "start_frame_sha", "scene_id", "mode",
-               "aspect_ratio", "refs", "camera_detail", "audio")
+               "aspect_ratio", "refs", "camera_detail", "audio", "end_framing")
 # What the agent may change. Files (start frame), output tier (resolution) and seed stay human-owned.
-AGENT_SHOT_FIELDS = ("title", "intention", "action", "framing", "camera_move", "camera_detail", "lens_look",
+AGENT_SHOT_FIELDS = ("title", "intention", "action", "framing", "end_framing", "camera_move", "camera_detail", "lens_look",
                      "lighting", "audio", "duration_s", "mode", "aspect_ratio", "refs", "scene_id")
 SHOT_MODES = ("first_frame", "reference")
 ASSET_KINDS = ("character", "location", "prop")
@@ -37,13 +37,14 @@ def _validate_shot_patch(patch: dict[str, Any]) -> dict[str, Any]:
     if unknown:
         raise ValueError(f"unknown shot field(s): {', '.join(sorted(unknown))}; allowed: {', '.join(SHOT_FIELDS)}")
     clean = dict(patch)
-    for control in ("framing", "camera_move", "lens_look", "lighting"):
+    for control in ("framing", "camera_move", "lens_look", "lighting", "end_framing"):
         if control not in clean:
             continue
+        preset = PRESETS["framing" if control == "end_framing" else control]
         if clean[control] in ("", None):
             clean[control] = None
-        elif clean[control] not in PRESETS[control]:
-            raise ValueError(f"{control} must be one of {', '.join(PRESETS[control])}")
+        elif clean[control] not in preset:
+            raise ValueError(f"{control} must be one of {', '.join(preset)}")
     if "duration_s" in clean:
         clean["duration_s"] = int(clean["duration_s"])
     if "mode" in clean and clean["mode"] not in SHOT_MODES:

@@ -55,9 +55,9 @@ def reviewed_reference_shot(w: World):
 # -- direction rules (HLD §6.3) -----------------------------------------------------------------
 
 def test_camera_detail_and_audio_compile_without_contradiction(world: World):
-    shot = world.shot(camera_detail="very slow, ending on her eyes", audio="rain on cobbles, no music")
+    shot = world.shot(camera_detail="very slow, settling as the car passes", audio="rain on cobbles, no music")
     p = world.service.create_proposal(shot["id"])["resolved_prompt"]
-    assert "Slow, steady push-in toward the subject: very slow, ending on her eyes." in p
+    assert "Slow, steady push-in toward the subject: very slow, settling as the car passes." in p
     assert "Sound: rain on cobbles, no music." in p
 
 
@@ -175,7 +175,8 @@ def test_scripted_agent_revises_draft_and_proposes_without_approving(world: Worl
     assert all(c["status"] == "done" for c in calls)
     s = world.ops.get_shot(shot["id"])
     assert s["revisions"][0]["author"] == "agent"
-    assert s["camera_detail"] == "very slow, steady pace, ending on her eyes"
+    assert s["camera_detail"] == "very slow, even pace" and s["end_framing"] == "close_up"
+    assert s["duration_s"] == 7                                         # wide -> close-up at 5 s was too fast
     assert "rain sound" in s["audio"] and s["refs_resolved"][0]["version"] == 2       # bumped to v2
     props = [p for p in s["proposals"] if p["status"] == "pending"]
     assert len(props) == 1 and props[0]["created_by"] == "agent" and props[0]["parent_take_id"] == take["id"]
@@ -185,7 +186,7 @@ def test_scripted_agent_revises_draft_and_proposes_without_approving(world: Worl
     assert write["result"]["content"]["changed"]["refs"] == {"from": ["@oli v1", "@street v1"],
                                                               "to": ["@oli v2", "@street v1"]}
     diff = world.ops.list_revisions(shot["id"])[0]["diff"]
-    assert {"camera_detail", "audio", "refs"} <= set(diff)
+    assert {"camera_detail", "audio", "refs", "end_framing", "duration_s"} <= set(diff)
 
 
 def test_reload_shows_history_and_never_re_executes(world: World):
@@ -478,3 +479,65 @@ def test_gemini_usage_counts_tool_use_tokens_and_keeps_raw():
     u2 = GI.Interaction.model_validate({"id": "i", "status": "completed", "steps": [], "usage": {
         "total_input_tokens": 100, "total_output_tokens": 10, "total_tokens": 600}}).usage
     assert gemini_usage(u2).input_tokens == 590              # unexplained internal tokens counted as input
+
+
+# -- M4: accounting keeps reported, calculated and confirmed apart -------------------------------
+
+def test_legacy_live_rows_are_labelled_not_recomputed(tmp_path):
+    import sqlite3
+    from studio.db import Database
+    path = tmp_path / "old.db"
+    Database(path)
+    c = sqlite3.connect(path)
+    c.execute("INSERT INTO agent_threads(id,project_id,provider,model,created_at) VALUES ('t','p','gemini','gemini-3.8-flash','x')")
+    c.execute("INSERT INTO agent_usage(thread_id,provider,model,input_tokens,output_tokens,est_usd,live,at) "
+              "VALUES ('t','gemini','gemini-3.8-flash',1239,67,0.001181,1,'x')")
+    c.commit(); c.close()
+    db = Database(path)                                                # migration pass
+    row = db.one("SELECT * FROM agent_usage")
+    assert row["calc_method"] == "gemini.v1" and row["est_usd"] == 0.001181 and row["raw_usage"] is None
+    acc = AgentStore(db).accounting()
+    assert acc["calculated"]["gemini.v1"]["certainty"] == "incomplete"
+    assert "understate" in acc["calculated"]["gemini.v1"]["caveat"]
+    assert acc["reported"]["gemini"]["raw_recorded"] == 0 and acc["confirmed"] == []
+    assert acc["status"] == "no confirmed billing recorded"
+
+
+def test_new_rows_keep_raw_usage_and_billing_is_human_entered(world: World):
+    shot = world.shot()
+    script = gemini_script(shot["id"])
+    script[0]["usage"]["total_tool_use_tokens"] = 500
+    script[0]["usage"]["input_tokens_by_modality"] = [{"modality": "image", "tokens": 258}]
+    mock = MockGeminiClient(script)
+    ag = runner(world, factory=lambda p, m: GeminiProvider(model=m, client=mock), agent_provider="gemini",
+                agent_budget_usd=1.0)
+    tid = ag.create_thread(shot["project_id"])["id"]
+    ag.send(tid, f"x {shot['id']}")
+    store = AgentStore(world.db)
+    acc = store.accounting()
+    assert acc["reported"]["gemini"]["raw_recorded"] == 3
+    assert acc["reported"]["gemini"]["fields"]["total_tool_use_tokens"] == 500
+    assert acc["calculated"]["gemini.v2"]["certainty"] == "calculated_conservative"
+    assert "inferred" in acc["calculated"]["gemini.v2"]
+    first = store.usage(tid)[0]
+    assert first["input_tokens"] == 1200 + 500 and json.loads(first["raw_usage"])["input_tokens_by_modality"][0]["tokens"] == 258
+    before = acc["calculated_total_usd"]
+    store.confirm_billing("gemini", "2026-10-20", 0.02, "AI Studio billing page")
+    acc2 = store.accounting()
+    assert acc2["confirmed_total_usd"] == 0.02 and acc2["calculated_total_usd"] == before
+    with pytest.raises(ValueError):
+        store.confirm_billing("gemini", "2026-10", 0.01, "  ")
+
+
+def test_real_live_run_backup_migrates_as_incomplete(tmp_path):
+    import shutil
+    from studio.config import ROOT
+    from studio.db import Database
+    src = ROOT / "backups" / "studio-pre-M4-live1.db"
+    if not src.exists():
+        pytest.skip("local backup of the first live run not present (not part of the repository)")
+    shutil.copy(src, tmp_path / "copy.db")
+    db = Database(tmp_path / "copy.db")
+    rows = db.all("SELECT est_usd, calc_method, raw_usage FROM agent_usage WHERE live=1 ORDER BY id")
+    assert len(rows) == 5 and {r["calc_method"] for r in rows} == {"gemini.v1"} and all(r["raw_usage"] is None for r in rows)
+    assert round(sum(r["est_usd"] for r in rows), 6) == 0.010153

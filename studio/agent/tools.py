@@ -32,7 +32,9 @@ PATCH_SCHEMA = {
     "description": "Only the fields to change. For /scenes give {name}.",
     "properties": {
         "title": _STR, "intention": _STR, "action": {"type": "string", "description": "What we see; timed beats like '0-2s: ...' must fit duration_s."},
-        "framing": {"type": "string", "enum": list(PRESETS["framing"])},
+        "framing": {"type": "string", "enum": list(PRESETS["framing"]), "description": "Starting framing."},
+        "end_framing": {"type": "string", "enum": list(PRESETS["framing"]),
+                        "description": "Framing the move reaches by the end (push_in: tighter, pull_out: wider). Omit if unchanged."},
         "camera_move": {"type": "string", "enum": list(PRESETS["camera_move"])},
         "camera_detail": {"type": "string", "description": "How the chosen camera_move behaves (pace, end point). Must not name a different move."},
         "lens_look": {"type": "string", "enum": list(PRESETS["lens_look"])},
@@ -281,6 +283,15 @@ class AgentTools:
             before = self.ops.get_shot_row(sid)
             after = self.ops.update_shot(sid, patch, inp["expected_revision"], author="agent")
             changed = {k: {"from": before.get(k), "to": after.get(k)} for k in patch if before.get(k) != after.get(k)}
+            if "duration_s" in changed:                 # the person approving pays for duration
+                from ..generation import WORKFLOW_FOR_MODE
+                m = self.service.adapter.manifest(WORKFLOW_FOR_MODE[after["mode"]])
+                n = len(after.get("refs") or [])
+                was = m.credits_estimate(int(before["duration_s"]), after["resolution"], n)
+                now_ = m.credits_estimate(int(after["duration_s"]), after["resolution"], n)
+                changed["duration_s"]["cost_impact"] = {
+                    "est_credits_before": was, "est_credits_after": now_, "delta_credits": round(now_ - was, 2),
+                    "note": "estimate on the real route; tell the person about this change"}
             if "refs" in changed:                       # readable: "@oli v1" rather than version ids
                 label = lambda refs: [f"@{r['handle']} v{r['version']}" for r in  # noqa: E731
                                       self.ops.resolve_refs(refs if isinstance(refs, str) else json.dumps(refs))]

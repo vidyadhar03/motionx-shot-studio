@@ -109,6 +109,9 @@ class GenerationService:
     def _check_budget(self, c, est: float) -> None:
         row = c.execute("SELECT COUNT(*) AS n, COALESCE(SUM(COALESCE(observed_credits, reserved_credits)),0) AS c "
                         "FROM spend").fetchone()
+        if self.settings.max_paid_attempts <= 0 or self.settings.budget_credits <= 0:
+            raise BudgetError("paid generation is disabled: set STUDIO_MAX_PAID_ATTEMPTS and STUDIO_BUDGET_CREDITS "
+                              "(both default to 0)")
         if row["n"] >= self.settings.max_paid_attempts:
             raise BudgetError(f"paid attempt limit reached ({row['n']}/{self.settings.max_paid_attempts})")
         if row["c"] + est > self.settings.budget_credits:
@@ -337,6 +340,85 @@ class GenerationService:
             if state:
                 c.execute("INSERT INTO take_events(take_id,state,detail,at) VALUES (?,?,?,?)", (tid, state, detail, ts))
 
+    def _transition(self, tid: str, from_state: str, to_state: str, detail: str | None = None, **fields: Any) -> bool:
+        """Atomic compare-and-set on state. Returns False if the take was no longer in `from_state`."""
+        ts = now()
+        fields.update(state=to_state, updated_at=ts)
+        sets = ", ".join(f"{k}=?" for k in fields)
+        with self.db.tx(immediate=True) as c:
+            cur = c.execute(f"UPDATE takes SET {sets} WHERE id=? AND state=?", [*fields.values(), tid, from_state])
+            if cur.rowcount != 1:
+                return False
+            c.execute("INSERT INTO take_events(take_id,state,detail,at) VALUES (?,?,?,?)", (tid, to_state, detail, ts))
+        return True
+
+    # -- cancellation (HUMAN action; behaviour depends on how far the take got) -----------------
+    CANCEL_MESSAGES = {
+        "canceled_before_submission": "Canceled before submission. Nothing was sent; the credit reservation was "
+                                      "released.",
+        "requested_unconfirmed": "Cancel recorded, but the submission is in flight or its outcome is unknown. If a job "
+                                 "was created, the app will ask the backend to cancel that one job. Charges may still "
+                                 "apply; no refund is implied. The take stays tracked.",
+        "remote_cancel_requested": "Asked the backend to cancel this job only (not a global interrupt). Cancellation "
+                                   "is confirmed only if the job later reports canceled. A hosted Partner task may "
+                                   "still finish and be charged; output and spend tracking continue.",
+        "too_late": "The job already finished generating; its output will still be saved and any charge applies.",
+        "already_final": "The take is already final; nothing to cancel.",
+        "nothing_to_cancel": "The backend no longer knows this job; nothing could be canceled. Spend tracking stays.",
+    }
+
+    def cancel(self, tid: str, by: str = "user") -> dict:
+        self.ops.get_take(tid)                                         # NotFound -> 404
+        ts = now()
+        canceled_now = False
+        with self.db.tx(immediate=True) as c:
+            cur = c.execute(
+                "UPDATE takes SET state='canceled', error='canceled before submission', finished_at=?, updated_at=?, "
+                "cancel_requested_at=COALESCE(cancel_requested_at, ?), cancel_outcome='canceled_before_submission' "
+                "WHERE id=? AND state='queued'", (ts, ts, ts, tid))
+            if cur.rowcount == 1:
+                row = c.execute("SELECT id FROM spend WHERE take_id=? ORDER BY at DESC LIMIT 1", (tid,)).fetchone()
+                if row:
+                    c.execute("DELETE FROM spend WHERE id=?", (row["id"],))
+                c.execute("INSERT INTO take_events(take_id,state,detail,at) VALUES (?,?,?,?)",
+                          (tid, "canceled", f"canceled before submission by {by}; reservation released", ts))
+                canceled_now = True
+        if canceled_now:                                   # read after commit
+            return self._cancel_result(tid, "canceled_before_submission")
+        t = self.db.one("SELECT * FROM takes WHERE id=?", tid)
+        state = t["state"]
+        if state in TERMINAL:
+            return self._cancel_result(tid, "already_final")
+        if state in ("generated", "import_failed"):
+            return self._cancel_result(tid, "too_late")
+        first = t["cancel_requested_at"] is None
+        if first:
+            self._set(tid, None, cancel_requested_at=ts, cancel_outcome="requested")
+            with self.db.tx() as c:
+                c.execute("INSERT INTO take_events(take_id,state,detail,at) VALUES (?,?,?,?)",
+                          (tid, "cancel_requested", f"by {by} while {state}", ts))
+        if state in ("submitting", "submission_unknown") or not t["job_id"]:
+            return self._cancel_result(tid, "requested_unconfirmed")
+        if state == "lost":
+            return self._cancel_result(tid, "nothing_to_cancel")
+        if first or (t["cancel_outcome"] or "").startswith("remote_cancel_error"):
+            self._remote_cancel(tid, t["job_id"])                         # repeated requests do not re-send
+        return self._cancel_result(tid, "remote_cancel_requested")
+
+    def _remote_cancel(self, tid: str, job_id: str) -> None:
+        try:
+            r = self.adapter.cancel(job_id)                                # job-scoped; never a global interrupt
+            outcome = f"remote_cancel_{r}"
+        except Exception as e:  # noqa: BLE001 - recorded, never raised to the caller
+            outcome = f"remote_cancel_error: {type(e).__name__}"
+        self._set(tid, None, cancel_outcome=outcome)
+        with self.db.tx() as c:
+            c.execute("INSERT INTO take_events(take_id,state,detail,at) VALUES (?,?,?,?)",
+                      (tid, "cancel_sent", f"{outcome} for job {job_id}", now()))
+
+    def _cancel_result(self, tid: str, result: str) -> dict:
+        return {"result": result, "message": self.CANCEL_MESSAGES[result], "take": self.ops.get_take(tid)}
+
     def _claim(self, tid: str) -> bool:
         t = self.clock()
         with self.db.tx(immediate=True) as c:
@@ -397,14 +479,17 @@ class GenerationService:
         if self.adapter.is_paid:
             before = self.balance_fn(self.settings.comfy_api_key)
             if before is not None and before < t["est_credits"]:
-                self._release_reservation(tid)
-                self._set(tid, "failed", "insufficient Comfy credits", error=
-                          f"account balance is {before} credits; this take needs ~{t['est_credits']}",
-                          finished_at=now())
+                if self._transition(tid, "queued", "failed", "insufficient Comfy credits", error=
+                                    f"account balance is {before} credits; this take needs ~{t['est_credits']}",
+                                    finished_at=now()):
+                    self._release_reservation(tid)
                 return
         key = t["idempotency_key"] or f"msx-{uuid.uuid4()}"
         # Durable intent BEFORE the call: if we die after this line, recovery sees 'submitting'.
-        self._set(tid, "submitting", None, idempotency_key=key, balance_before_credits=before, error=None)
+        # Conditional on 'queued': a cancel that committed first wins, and nothing is dispatched.
+        if not self._transition(tid, "queued", "submitting", None, idempotency_key=key,
+                                balance_before_credits=before, error=None):
+            return
         try:
             job_id = self.adapter.submit(req, key)
         except UnsupportedRequest as e:
@@ -417,6 +502,8 @@ class GenerationService:
             self._set(tid, "submission_unknown", "submission outcome unknown; not resubmitted", error=str(e))
         else:
             self._set(tid, "submitted", f"job {job_id}", job_id=job_id, submitted_at=now())
+            if self.db.one("SELECT cancel_requested_at FROM takes WHERE id=?", tid)["cancel_requested_at"]:
+                self._remote_cancel(tid, job_id)        # cancel arrived while we were submitting
 
     def _poll(self, t: dict) -> bool:
         """True when the take moved past polling; False when it should wait (deadline/lease)."""
@@ -446,7 +533,17 @@ class GenerationService:
                 continue
             if js.status == "succeeded":
                 outs = [o.__dict__ for o in js.outputs]
-                self._set(tid, "generated", f"{len(outs)} output(s)", output_meta=dumps({"outputs": outs}))
+                extra = {}
+                if self.db.one("SELECT cancel_requested_at FROM takes WHERE id=?", tid)["cancel_requested_at"]:
+                    extra["cancel_outcome"] = "remote_cancel_not_honoured"
+                self._set(tid, "generated", f"{len(outs)} output(s)", output_meta=dumps({"outputs": outs}), **extra)
+                return True
+            if js.status == "canceled":
+                requested = self.db.one("SELECT cancel_requested_at FROM takes WHERE id=?", tid)["cancel_requested_at"]
+                self._set(tid, "canceled", "backend confirmed the job was canceled",
+                          cancel_outcome="remote_cancel_confirmed" if requested else "canceled_by_backend",
+                          error="canceled", finished_at=now())
+                self._observe_charge(tid)               # a Partner task may still have been billed
                 return True
             if js.status == "lost":
                 self._set(tid, "lost", js.error, error=js.error)

@@ -180,17 +180,20 @@ The thread is bound to one project. Every path is relative to it, so another pro
 | Instruction kind | Lands in | Rule enforced in code |
 |---|---|---|
 | Which move ("push in", "track") | `camera_move` preset | One preset per shot |
-| How the move behaves ("slower", "ends on her eyes", "starts after 2 s") | **new** `camera_detail` (≤ 200 chars), rendered right after the preset phrase | Refused if it names a *different* move from the preset vocabulary (e.g. "pan" while `camera_move=push_in`). Change the preset instead. Refused if `camera_move` is empty |
+| Where the move ends ("end on her eyes") | **`end_framing`** (M4), rendered as "The move carries the frame to a close-up on the face by the end of the shot." | Needs a starting `framing` and a size-changing move. `push_in` must end tighter and `pull_out` wider; static, pans and tilts are refused; an end equal to the start is refused |
+| How the move behaves ("slower", "starts after 2 s") | `camera_detail` (≤ 200 chars), rendered right after the preset phrase | Refused if it names a *different* move, **restates its own preset** (M4), or implies a tighter ending ("eyes", "close-up") on a wide/medium shot without `end_framing` (M4). Refused if `camera_move` is empty |
 | Timing ("hold 2 s, then she turns") | `duration_s` (4–15) plus timed beats in `action` ("0–2s: …; 2–5s: …") | Any time mentioned in `action` or `camera_detail` must be ≤ `duration_s` |
+| "Too fast" | One coherent remedy: slower `camera_detail` pace, a shorter distance (`end_framing`), or a longer `duration_s` | The write result reports the estimate before and after any duration change, so the agent can state the cost (M4) |
+| Vague or unsupported notes | No edit. The agent explains the limit or asks which aspect to change | Skill rule; the scripted provider does this; untested live |
 | Sound ("rain on cobbles, no music") | **new** `audio` (≤ 300 chars), rendered as `Sound: …` | H3 always generates audio; this steers it. Not a guarantee |
 | Lighting / lens / framing | existing presets | Changing the preset is the only way; free text doesn't restate them |
 | Story, performance, blocking | `intention` / `action` | – |
 
 Compile order:
 
-`intention · action · framing · camera_move[ — camera_detail] · lens · lighting · Style: direction · [Image N bindings] · Sound: audio · closing line`
+`intention · action · framing[ · end-framing sentence] · camera_move[: camera_detail] · lens · lighting · Style: direction · [Image N bindings] · Sound: audio · closing line`
 
-With `camera_detail` and `audio` empty, the output is byte-identical to M1/M2, so paid run 1 stays reproducible.
+With `end_framing`, `camera_detail` and `audio` empty, the output is byte-identical to M1/M2, so paid run 1 stays reproducible.
 
 ### 6.4 Proposal freshness (bound to its input context)
 
@@ -229,11 +232,16 @@ With `camera_detail` and `audio` empty, the output is byte-identical to M1/M2, s
   - Estimate = approximate input tokens (characters / 3.5 + 1,600 per image) × input price + (`max_output_tokens` + an assumed thinking allowance `STUDIO_AGENT_THOUGHT_ALLOWANCE`) × output price, from the dated table in `studio/agent/pricing.py`.
   - It isn't a bound because the input count is approximate, and the docs don't say whether `max_output_tokens` also caps thinking.
   - If a request's calculated cost exceeds its estimate, the loop stops.
-- **After the call**, cost is calculated from reported usage at list price.
-  - Gemini: billable input = max(`total_input_tokens` + `total_tool_use_tokens`, `total_tokens` − output − thought) × input price, plus (`total_output_tokens` + `total_thought_tokens`) × output price.
-  - Why: image tokens are inside input; thoughts are reported separately from output; and the first live run showed function-result content counted outside `total_input_tokens`. The raw usage object is stored for audit, and cached input is charged at the full rate (conservative).
-  - Anthropic: `input_tokens` + cache tokens, and `output_tokens`.
-  - This is a calculation, not a billing record. Gemini's free tier isn't assumed.
+- **Three separate things, never mixed** (`GET /api/agent/accounting`):
+  1. **Reported usage:** the provider's raw usage object is stored per request. For Gemini that includes `total_tool_use_tokens`, `total_thought_tokens`, `input_tokens_by_modality` (images) and `total_tokens` when returned.
+  2. **Calculated cost:** an estimate at list price. Each row names its `calc_method` and certainty (`studio/agent/pricing.py` `CALC_METHODS`):
+     - `gemini.v2` (conservative): input = max(input + tool_use, total − output − thought); output + thought at the output price.
+       - Documented: thinking billed as output; images inside input; thoughts reported separately from output.
+       - **Inferred:** that tool-use tokens bill as input for client function calls. The field is documented, its billing isn't.
+       - Cached input is charged at the full rate, which overstates.
+     - `gemini.v1`: the first live run (5 requests, $0.010153). These rows are labelled **incomplete**: tool-use, total and modality fields weren't recorded and are **not reconstructed**.
+     - `anthropic.v1`: input + cache tokens at the input rate, output at the output rate (conservative).
+  3. **Confirmed billing:** only what a person enters from the provider's billing console (`POST /api/agent/billing`, with its source). The app never infers it.
 - **No automatic network retries.** The Gemini Interactions client retries 408/409/429/5xx up to 3 times by default, and `retry_options.attempts=0` still leaves one retry (verified offline). The adapter therefore sets that client's retry strategy to `none` and refuses to call if it isn't in effect.
 - **Model verification:** before the first live call per process, the provider verifies the model ID (Gemini `client.models.get`, Anthropic `client.models.retrieve`) and refuses on failure. Not run in M3, since no live calls are authorised.
 - **Credentials:** `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` stay in env only. They never appear in threads, tool records, snapshots or logs; a test scans the data dir.
@@ -337,6 +345,25 @@ take: queued ─► submitting* ─► submitted(job_id) ─► running ─► g
 - Ownership is a lease row in SQLite, so the approve path and the sweeper can't both run a take.
 - On startup, `submitting` rows become `submission_unknown`, and queued/submitted/running/generated/import_failed/poll_timeout takes are resumed **by polling the stored job id**. Every 30 s the sweeper does the same, except for `poll_timeout`.
 - Outputs are downloaded **immediately**: signed URLs and Comfy assets expire. We store sha256, size and mime.
+
+**Cancellation (M4, human action, state-dependent)**
+
+| State when you press Cancel | What happens | What it doesn't promise |
+|---|---|---|
+| `queued` (not yet dispatched) | Atomic compare-and-set `queued → canceled`. The worker's `queued → submitting` transition uses the same condition, so exactly one wins. The credit reservation is released. Nothing is ever sent | – |
+| `submitting` (in flight) or `submission_unknown` | Cancel is recorded. If a job id arrives, the worker asks the backend to cancel **that one job** | No remote cancellation, avoided charge or refund. Tracking and the reservation stay |
+| `submitted` / `running` / `poll_timeout` | Job-scoped cancel: SDK `job.cancel()` → proxy → ComfyUI `POST /api/jobs/{id}/cancel`, which calls `interrupt_if_running(prompt_id)` or dequeues it. **Never the global `/interrupt`.** Polling continues. Only a later `canceled` status counts as confirmed | A hosted Partner (H3) task may still finish and be billed; the reservation and balance reconciliation stay. If the job succeeds anyway, its output is saved (`remote_cancel_not_honoured`) |
+| `generated` / `import_failed` | Refused (`too_late`); the output will still be saved | – |
+| Final states | No-op (`already_final`). Repeated requests are idempotent and never re-send a remote cancel | – |
+
+**Export (M4)**
+
+`GET /api/projects/{id}/export.zip` returns `manifest.json` (`motionx.export/1`) plus the **selected successful** take of each shot, ordered by scene then shot.
+- **Files:** byte-identical copies (`ZIP_STORED`, no transcoding or timeline).
+- **Per take in the manifest:** project, scene, shot and take ids, `parent_take_id`, the **exact stored snapshot** (and its sha256), pinned asset versions and start frame from that snapshot, workflow, model and settings, file sha256 and probe data, and cost with its certainty (`no_charge`, `estimate_only` or `observed_balance_delta`).
+- **Missing shots:** listed under `missing` with a reason.
+- **Integrity:** every file is hashed before packing and the finished ZIP is re-read and re-hashed. Any mismatch refuses the whole export (409).
+- **Excluded:** credentials, local absolute paths (sanitised as defence in depth) and agent conversations.
 
 **Limits (application code, not the agent)**
 

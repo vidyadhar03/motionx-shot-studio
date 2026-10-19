@@ -17,7 +17,7 @@ export type Shot = {
   duration_s: number; resolution: string; seed: number | null; start_frame_sha: string | null;
   selected_take_id: string | null; proposals: Proposal[]; takes: Take[];
   scene_id: string | null; mode: "first_frame" | "reference"; aspect_ratio: string;
-  camera_detail: string; audio: string; locked: number;
+  camera_detail: string; audio: string; locked: number; end_framing: string | null;
   refs: { asset_version_id: string }[]; refs_resolved: RefResolved[];
   revisions: { revision: number; author: string; at: string }[];
 };
@@ -35,6 +35,7 @@ export type Take = {
   id: string; shot_id: string; proposal_id: string; number: number; parent_take_id: string | null; state: string;
   adapter: string; is_paid: number; job_id: string | null; output_sha: string | null; est_credits: number;
   observed_credits: number | null; error: string | null; review: string; created_at: string;
+  cancel_requested_at: string | null; cancel_outcome: string | null;
   submitted_at: string | null; finished_at: string | null; snapshot: Record<string, any>;
   output_meta: { saved?: { duration_s?: number; width?: number; height?: number; has_audio?: boolean } } | null;
   feedback: { id: string; reason: string; note: string; author: string; at: string }[];
@@ -62,6 +63,18 @@ export type AgentCall = { id: number; call_id: string; name: string; input: Reco
                           result: { content: Record<string, any>; is_error: boolean; images: { mime: string; sha256: string }[] } | null;
                           started_at: string; finished_at: string | null };
 export type ThreadView = { thread: AgentThread; messages: AgentMessage[]; tool_calls: AgentCall[]; live_spend_usd: number };
+
+export type ExportPreview = {
+  manifest_version: string;
+  included: { scene: { name: string } | null; shot: { id: string; title: string }; take: number; file: string; cost: string }[];
+  missing: { scene: { name: string } | null; shot: { id: string; title: string }; reason: string }[];
+};
+export type CancelResult = { result: string; message: string; take: Take };
+export type Accounting = {
+  reported: Record<string, { requests: number; raw_recorded: number; fields: Record<string, number> }>;
+  calculated: Record<string, { requests: number; usd: number; certainty: string; caveat?: string; inferred?: string }>;
+  calculated_total_usd: number; confirmed_total_usd: number; confirmed: unknown[]; status: string;
+};
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -113,6 +126,10 @@ export const api = {
   thread: (tid: string) => call<ThreadView>("GET", `/api/agent/threads/${tid}`),
   sendAgent: (tid: string, text: string, focus_shot_id: string | null) =>
     call<ThreadView>("POST", `/api/agent/threads/${tid}/messages`, { text, focus_shot_id }),
+  exportPreview: (pid: string) => call<ExportPreview>("GET", `/api/projects/${pid}/export/preview`),
+  exportUrl: (pid: string) => `/api/projects/${pid}/export.zip`,
+  cancelTake: (tid: string) => call<CancelResult>("POST", `/api/takes/${tid}/cancel`),
+  accounting: () => call<Accounting>("GET", "/api/agent/accounting"),
   resume: (tid: string) => call<Take>("POST", `/api/takes/${tid}/resume`),
   resolve: (tid: string, body: { job_id?: string; resubmit?: boolean }) => call<Take>("POST", `/api/takes/${tid}/resolve`, body),
   candidates: (tid: string) => call<{ jobs: { id: string; status: string; created_at: string }[] }>("GET", `/api/takes/${tid}/candidates`),

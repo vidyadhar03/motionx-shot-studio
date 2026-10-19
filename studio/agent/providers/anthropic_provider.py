@@ -21,6 +21,7 @@ DEFAULT_MODEL = "claude-opus-5-5"
 class AnthropicProvider:
     name = "anthropic"
     live = True
+    calc_method = "anthropic.v1"
     supports_tool_images = True
 
     def __init__(self, *, model: str | None = None, api_key: str | None = None, effort: str = "low",

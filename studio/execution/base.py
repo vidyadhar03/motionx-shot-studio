@@ -242,4 +242,9 @@ class Adapter(Protocol):
         """Recently recorded jobs on the backend, for a human resolving `submission_unknown`."""
         ...
 
+    def cancel(self, job_id: str) -> str:
+        """Ask the backend to cancel ONE job. Returns "requested" | "unknown_job" | "refused". Never a global
+        interrupt and never a confirmation: confirmation only comes from a later `get()` reporting canceled."""
+        ...
+
     def versions(self) -> dict[str, str]: ...

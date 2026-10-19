@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AgentCall, AgentConfig, AgentThread, api, ThreadView } from "./api";
+import { Accounting, AgentCall, AgentConfig, AgentThread, api, ThreadView } from "./api";
 
 // Shows the persisted thread exactly as stored. Loading a thread only reads; it never re-runs tools.
 export default function AgentPanel({ projectId, focusShot, onStateChanged, onOpenShot, onError }: {
@@ -7,13 +7,14 @@ export default function AgentPanel({ projectId, focusShot, onStateChanged, onOpe
   onStateChanged: () => void; onOpenShot: (id: string) => void; onError: (e: unknown) => void;
 }) {
   const [config, setConfig] = useState<AgentConfig | null>(null);
+  const [acct, setAcct] = useState<Accounting | null>(null);
   const [threads, setThreads] = useState<AgentThread[]>([]);
   const [view, setView] = useState<ThreadView | null>(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { api.agentConfig().then(setConfig).catch(onError); }, [onError]);
+  useEffect(() => { api.agentConfig().then(setConfig).catch(onError); api.accounting().then(setAcct).catch(() => {}); }, [onError, view]);
   useEffect(() => {
     setView(null);
     api.threads(projectId).then((ts) => { setThreads(ts); if (ts[0]) api.thread(ts[0].id).then(setView).catch(onError); })
@@ -55,6 +56,16 @@ export default function AgentPanel({ projectId, focusShot, onStateChanged, onOpe
         Default: {config.provider === "scripted" ? "scripted (rule-based stand-in, not an AI)" : `${config.provider} ${config.model}`} ·
         LLM spend ${config.spent_usd.toFixed(4)} / ${config.budget_usd.toFixed(2)} cap{config.budget_usd === 0 ? " (live calls blocked)" : ""}
       </div>}
+      {acct && Object.keys(acct.calculated).some((k) => k !== "none") && (
+        <details className="accounting">
+          <summary>LLM cost: calculated ${acct.calculated_total_usd.toFixed(4)} · confirmed {acct.confirmed.length ? `$${acct.confirmed_total_usd.toFixed(4)}` : "none recorded"}</summary>
+          <div className="hint">Reported tokens come from the provider. Calculated cost is our estimate at list price. Only confirmed figures come from a billing console.</div>
+          {Object.entries(acct.calculated).filter(([k]) => k !== "none").map(([k, c]) => (
+            <div key={k} className="hint"><code>{k}</code> · {c.requests} request(s) · ${c.usd.toFixed(4)} · <strong>{c.certainty.replace(/_/g, " ")}</strong>
+              {c.caveat ? ` · ${c.caveat}` : ""}{c.inferred ? ` · inferred: ${c.inferred}` : ""}</div>
+          ))}
+        </details>
+      )}
       {threads.length > 1 && (
         <select value={view?.thread.id ?? ""} onChange={(e) => api.thread(e.target.value).then(setView).catch(onError)}>
           {threads.map((t) => <option key={t.id} value={t.id}>{t.provider} · {t.created_at.slice(0, 16).replace("T", " ")}</option>)}
