@@ -1,0 +1,49 @@
+{
+  "id": "h3_first_frame",
+  "version": 1,
+  "title": "MiniMax H3 — start frame to video",
+  "mode": "first_frame",
+  "workflow_file": "h3_first_frame.api.json",
+  "source": {
+    "template": "api_minimax_h3_flf2v",
+    "package": "comfyui-workflow-templates 0.11.89",
+    "license": "MIT (Comfy-Org/workflow_templates)",
+    "converted_with": "ComfyUI 0.42.1 frontend app.graphToPrompt(); last_frame LoadImage removed"
+  },
+  "comfyui_min_version": "0.42.1",
+  "partner_node": true,
+  "bindings": {
+    "first_frame": {"node": "15", "field": "image", "kind": "asset"},
+    "prompt": {"node": "28", "field": "model.prompt"},
+    "resolution": {"node": "28", "field": "model.resolution"},
+    "duration": {"node": "28", "field": "model.duration"},
+    "seed": {"node": "28", "field": "seed"},
+    "model": {"node": "28", "field": "model"},
+    "watermark": {"node": "28", "field": "watermark"},
+    "output": {"node": "26"}
+  },
+  "fixed": {"model": "MiniMax H3", "watermark": false},
+  "capabilities": {
+    "start_frame": "required",
+    "end_frame": "not_supported_in_this_workflow",
+    "reference_images": 0,
+    "image_min_side_px": 256,
+    "image_aspect_min": 0.4,
+    "image_aspect_max": 2.5,
+    "max_image_bytes": 20000000,
+    "image_mime_types": ["image/png", "image/jpeg", "image/webp"],
+    "aspect_ratio": "follows_start_frame",
+    "durations_s": {"min": 4, "max": 15},
+    "resolutions": ["768P", "2K"],
+    "seed": {"min": 0, "max": 4294967295, "deterministic": false},
+    "audio": "always_generated",
+    "max_prompt_chars": 4000,
+    "prompt_controls_are_calibrated": false
+  },
+  "pricing": {
+    "basis": "Partner Node price badge in ComfyUI 0.42.1 (nodes_minimax.py) and docs.comfy.org partner-node pricing, 2026-10-19",
+    "usd_per_second": {"768P": 0.1287, "2K": 0.1859},
+    "credits_per_usd": 211,
+    "verified_by_real_charge": false
+  }
+}

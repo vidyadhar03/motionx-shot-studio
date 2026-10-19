@@ -1,0 +1,130 @@
+# MotionX Shot Studio: Implementation Plan
+
+**Revised:** 2026-10-20 for the settled local execution route. **Hard deadline:** Fri 2026-10-30, 09:00 PT. **Our target:** submit on Thu 2026-10-29 by 18:00 PT.
+**Design:** [HLD.md](HLD.md). Labels: **FACT** (verified), **DESIGN**, **UNTESTED**.
+
+**Execution route:** MotionX → official Comfy SDK → local ComfyUI through comfy-api-proxy → MiniMax H3 Partner Node → hosted video generation → locally saved take. There's no Comfy Cloud subscription, no rented GPU and no local video weights.
+
+---
+
+## 1. Repository findings
+
+Inspected 2026-10-19, read-only. Paths are relative to each repo.
+
+| Repo (remote, visibility) | State | Relevant files | Verdict |
+|---|---|---|---|
+| `~/motionx-spike` (`motionx-harness-resources`, private) | `main`; `.DS_Store` modified, `project state/` untracked | `agent_claude.py` (170 lines, Anthropic tool loop), `agent_gemini.py`, `spike_tools.py` (list/read/write/generate over **production Firestore**), `schema.py` (Take/Run/RejectionReason/`idempotency_key`, reroll), `skills/shot-listing.md`, `skills/scene-context.md`, `PROJECT_STATE.md` | **Reuse:** loop, tool shape, provenance ideas, skill craft text. **Don't build on it:** Firestore-bound. ⚠ `README.md` contains a committed Gemini API key |
+| `~/video-harness` (`harness-spike`, **public**) | `main`, in sync with origin; 6 modified and 3 untracked files (location-build WIP). `pytest`: **387 passed** | `harness/memory/imagegen.py` (provider-neutral protocol, `Capabilities.validate`, `SubmissionOutcomeUnknown`), `harness/memory/concept_generation.py` (durable job state machine, persist-before-call, `submission_unknown`), `harness/api/generation.py` (dispatcher and sweeper), `harness/memory/luma.py` (adapter example), `harness/memory/ports.py` (Store protocol, 40+ domain methods) | **Port patterns** (≈400 lines). **Don't extend:** Firestore/GCS/Gemini/GCP-ADC, location-memory domain, private GCP setup. ⚠ `env.sh` is tracked and pushed to the **public** remote with a value for `LUMA_AGENTS_API_KEY` that looks real |
+| `~/location-studio` (`harness-frontend`) | `main`; 6 modified, 3 untracked | `AGENTS.md` (Next 16 has breaking changes; read local docs first), `app/ConnectedStudio.tsx` (3,391 lines), `app/generation/*`, `lib/harness.ts`, IndexedDB storage | UI ideas only (approval cards, versions). Not a foundation |
+| `~/locvis` (`locvis`) | `main`; 1 modified, 3 untracked | `models.py` (`CameraSetup`, `PlateSpec`, `LightingState`), `analyse.py` (Gemini) | Not used in October. Candidate for calibrated camera data later |
+| `~/motionx-location-lab` | **not a git repo** | Next/Vinext, three.js camera with focal length/sensor, frame capture plus DOP JSON | Not used in October. Later source of start frames with real camera metadata |
+| `~/Desktop/MotionX/MotionX-Studio-Backend` (legacy, not on the list) | – | `app/services/comfyui_parser.py`, `workflow_translator.py` translate Comfy graphs into MotionX's own workers | Doesn't execute on Comfy. Not reused |
+| `~/Desktop/MotionX/higgsfield-research` (not git) | reports present | `phase-2/CINEMA_STUDIO.md`, `phase-2/GENERATION_TEST_PLAN.md` (**not** at the root), `phase-3/MEMORY_AND_PROJECTS.md` (Elements, Projects), `phase-3/AGENT_ARCHITECTURE.md`, `phase-3/SUPERCOMPUTER_PRODUCT.md` | Informs the preset set and the approval design. There's no separate "Elements" report; Elements are covered in CINEMA_STUDIO §6 and MEMORY_AND_PROJECTS §1 |
+
+No `AGENTS.md` or `CLAUDE.md` exists in spike, video-harness, locvis or location-lab. location-studio's only concerns Next 16.
+
+## 2. Milestones through October 30
+
+| # | Dates | Deliverable | Status |
+|---|---|---|---|
+| **M0** | Mon 19 – Tue 20 | Local execution stack installed and pinned. API-format H3 first-frame workflow and manifest. Repo scaffold. Fake adapter. Zero-cost route probe | **Done** (fake + probe). The paid smoke run is blocked on `COMFY_API_KEY` (§3, step 6) |
+| **M1** | Tue 20 – Thu 22 | Vertical slice: upload frame → shot → proposal → approval → take → feedback → second take, both retained | **Done with the fake adapter** (§5). The real two-take run waits for the key |
+| **M2** | Fri 23 – Sat 24 | Assets with immutable versions, scenes, the reference path (`h3_reference` via `MinimaxHailuo03ReferenceNode`, 1–9 images, "Image N" binding), capability errors in the UI | Planned. Reference-to-video stays here |
+| **M3** | Sun 25 – Mon 26 | Agent: one loop, 4 tools (`list`, `read`, `write`, `propose_generation`), `skills/shot-direction.md`, persisted thread. The agent can propose and can't approve | Planned. `generation.py` already separates `create_proposal` (agent-safe) from `approve` (human HTTP route only) |
+| **M4** | Tue 27 – Wed 28 | Export (selected MP4s + manifest), cancel, README check from a clean clone | Planned |
+| **M5** | Thu 29 | Demo project with licensed inputs, demo video, publish (needs approval), submit | Planned |
+
+## 3. Local execution setup (verified 2026-10-20)
+
+Installed on this Mac (MacBook Air M4, macOS 26), all pinned:
+
+| Component | Version | Where | How |
+|---|---|---|---|
+| ComfyUI | **v0.42.1** (frontend 1.55.18, templates 0.11.89, torch 2.14.1 with MPS) | `runtime/ComfyUI` (gitignored) | `scripts/setup_comfy.sh` (git tag + its own venv) |
+| comfy-api-proxy | **0.1.6** (MIT) | app venv | `pip install -e .` |
+| comfy-sdk | **0.5.0** (MIT) | app venv | `pip install -e .` |
+| App | Python 3.12, FastAPI 0.149, Vite 8.3.4, React 19.3.1 | repo | `pyproject.toml`, `web/package.json` |
+| Model weights | none | – | H3 runs as a hosted Partner Node |
+
+There was no existing ComfyUI, Comfy Desktop, comfy-cli or Comfy API key on this machine before this session.
+
+**Steps (a new machine follows the same ones):**
+
+1. `./scripts/setup_comfy.sh`: clones ComfyUI v0.42.1 into `runtime/` and installs its requirements.
+2. `uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e ".[dev]"`
+3. `./scripts/run_comfy.sh`: ComfyUI on 127.0.0.1:8188 and `comfy-api-proxy run --state-dir runtime/proxy-state` on 127.0.0.1:8189.
+4. `.venv/bin/python scripts/comfy_check.py versions` and then `probe`. FACT 2026-10-20: the probe submits the real graph without a key. ComfyUI accepts it and node 28 refuses with `Unauthorized: Please login first to use this node.` No account is involved, so nothing is billed.
+5. 👤 Create an API key at `https://platform.comfy.org/profile/api-keys` (shown once) and put it in `.env` as `COMFY_API_KEY=comfyui-…`. `.env` is gitignored.
+6. 👤 Credits: check the balance with `scripts/comfy_check.py balance` (read-only `GET api.comfy.org/customers/balance`). If it's below ~136 credits, top up in ComfyUI **Settings → Workspace → Plan & Credits** or at platform.comfy.org. **Minimum top-up: not published.** The support article says to select a preset or enter a custom amount. Rate: **$1 = 211 credits** (FACT, Comfy support). Top-ups expire after 1 year and aren't refundable. A negative balance blocks Partner Nodes.
+7. Set `STUDIO_ADAPTER=comfy_local` in `.env`, then run `./scripts/run_app.sh` and open http://127.0.0.1:8700.
+
+**Workflow and manifest.**
+
+- `workflows/h3_first_frame.api.json` was converted from the bundled official template `api_minimax_h3_flf2v` (MIT) with ComfyUI 0.42.1's own `app.graphToPrompt()`. The last-frame `LoadImage` was removed.
+- Bindings: node `15.image` (frame), node `28` (`model`, `model.prompt`, `model.resolution`, `model.duration`, `seed`, `watermark`), node `26` SaveVideo (output).
+- `workflows/h3_first_frame.manifest.json` declares the capabilities and the pricing basis.
+
+**Cost basis (FACT).**
+
+- The node's own price badge in `comfy_api_nodes/nodes_minimax.py` gives H3 768P at **$0.1287/s** and 2K at $0.1859/s. Comfy's pricing page lists 27.16 credits/s.
+- A 5 s 768P take is therefore **≈ 135.8 credits ≈ $0.64**.
+- This phase's cap (5 attempts / 700 credits) allows at most 5 such takes, and the app enforces it.
+- Comfy notes that Partner Nodes sometimes post cost after execution, so the observed charge is a balance delta that can be re-read with `POST /api/takes/{id}/reconcile`.
+
+**Paid run protocol (when the key exists).**
+
+1. Run one 5 s 768P take through the UI.
+2. Compare `observed_credits` with the 135.8 estimate.
+3. Continue to take 2 only if the observed charge is ≤ the estimate plus a small margin and the cumulative total stays ≤ 700.
+4. Stop if the charge can't be established from the balance delta within the cap.
+
+## 4. M0/M1 implementation (done)
+
+| Area | Files |
+|---|---|
+| Settings, secrets kept out of repr/logs | `studio/config.py` |
+| SQLite schema with DB-enforced immutability (take snapshot, media, decided proposals) | `studio/db.py` |
+| Content-addressed media store and upload validation | `studio/media.py` |
+| Projects, shots (optimistic revisions + history), feedback, review, select | `studio/ops.py` |
+| Deterministic prompt compiler and the October preset set | `studio/compiler.py` |
+| Provider-neutral contract: RenderRequest, Capabilities, error taxonomy, Manifest | `studio/execution/base.py` |
+| Real adapter: SDK → proxy → ComfyUI → H3 (the only file with node ids) | `studio/execution/comfy_local.py` |
+| Fake adapter: file-backed "remote" jobs, scripted failures, ffmpeg placeholder renders | `studio/execution/fake.py` |
+| Proposal → approval → take state machine, spend ledger, balance delta, recovery, human resolution | `studio/generation.py` |
+| Dispatcher, lease-safe scheduling and sweeper | `studio/worker.py` |
+| HTTP API and static UI serving | `studio/api.py` |
+| Read-only balance | `studio/balance.py` |
+| UI: project, shot editor, proposal card, take cards, revise, compare, resolve/resume | `web/src/*.tsx`, `web/src/styles.css` |
+| Scripts | `scripts/setup_comfy.sh`, `scripts/run_comfy.sh`, `scripts/run_app.sh`, `scripts/comfy_check.py` |
+| Tests | `tests/test_generation.py`, `tests/test_api.py`, `tests/test_comfy_adapter.py` |
+
+## 5. Acceptance criteria (M1) and results
+
+All of these are **fake-adapter or offline results** unless marked otherwise. No paid generation has run.
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Frames <256 px or with aspect outside 0.4–2.5 are rejected before any Comfy call | ✅ `test_capabilities_reject_bad_frames…`, HTTP 422 with the reason |
+| 2 | Editing a shot increments its revision; a proposal from an old revision becomes `stale` and can't be approved; stale writes get 409 | ✅ `test_proposal_goes_stale…`, `test_stale_revision_write_is_refused`, `test_full_http_flow` |
+| 3 | Proposal card shows the resolved prompt, input sha, workflow, seed, duration, resolution and cost | ✅ UI, browser-verified |
+| 4 | Duplicate/concurrent approval creates exactly one take and one job | ✅ 8 concurrent threads in a test. In the browser, two clicks plus three parallel POSTs gave one take, and the API returned 201 then 200 with the same id |
+| 5 | Successful take stores the MP4 with its sha256 and an immutable snapshot (shot fields, frame sha, prompt, workflow and manifest sha, node bindings, seed, versions) | ✅ The DB trigger refuses snapshot updates (`test_snapshot_and_media_are_immutable…`) |
+| 6 | Feedback on take 1, then revise, gives take 2 with `parent_take_id`; both are playable and take 1's snapshot bytes are unchanged | ✅ test plus browser run: take 1 at rev 2/static, take 2 at rev 3/push-in, side-by-side compare |
+| 7 | Recovery: crash while `submitted` resumes the same job; crash mid-submit becomes `submission_unknown` with no resubmit; download failure is resumable; ambiguous submit plus a human attach works | ✅ tests. Also a live kill/restart of the running app: same job id, backend submission count unchanged (3 → 3) |
+| 8 | Offline test suite passes | ✅ **25 passed** (`.venv/bin/python -m pytest -q`) |
+| 9 | No secret in the DB, media, logs or snapshots | ✅ `test_partner_key_never_reaches_database_or_snapshot` scans every file in the data dir |
+| 10 | Paid-mode guards: no key → 402; budget and attempt caps → 402; balance below estimate → fails before submitting; definite rejection releases the reservation | ✅ tests plus an app check in `comfy_local` mode (402, 0 takes) |
+| 11 | **Real** hosted H3 run with the observed charge recorded | ⏳ **Blocked: no `COMFY_API_KEY` on this machine.** The zero-cost probe through the real stack passes |
+
+## 6. Main risks
+
+| Risk | Mitigation |
+|---|---|
+| **Schedule** (10 days) | M1 is done on fake. M2 and M3 are scoped down; the agent can shrink to `read` + `propose_generation` |
+| Restarting ComfyUI mid-generation loses the job (in-memory history) while the hosted task is still billed | The take is marked `lost`. The UI and README say not to restart ComfyUI while a take runs. Concurrency is 1 |
+| Partner cost posts late, so the balance delta under-reads | Reservations count the estimate until an observed value exists. `reconcile` re-reads later. Spending is sequential |
+| comfy-api-proxy 0.1.x / SDK 0.5 are young | Pinned. The adapter is small and isolated. The probe script catches drift |
+| H3 doesn't follow camera/lens/lighting phrases, or reference identity drifts | Controls are labelled as prompt descriptors. The resolved prompt is visible. The revision loop is the remedy |
+| Start frame plus references can't be combined in one H3 call | Documented two-step workaround (HLD §7.2). A composition stage is a stretch goal |
+| Secret exposure | `.env` is gitignored, the key is never stored or serialized (tested). ⚠ Rotate the Luma key pushed in public `video-harness/env.sh` and the Gemini key in the spike README |
+| Demo rights and likeness | CC0 or self-made inputs only (`samples/frame_cc0.png` is synthetic, made in this repo) |

@@ -1,0 +1,31 @@
+{
+  "15": {
+    "inputs": {"image": "PLACEHOLDER_FIRST_FRAME.png"},
+    "class_type": "LoadImage",
+    "_meta": {"title": "First frame"}
+  },
+  "26": {
+    "inputs": {
+      "filename_prefix": "video/motionx_h3_ff",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto",
+      "video": ["28", 0]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {"title": "Save Video"}
+  },
+  "28": {
+    "inputs": {
+      "model": "MiniMax H3",
+      "model.prompt": "",
+      "model.resolution": "768P",
+      "model.duration": 5,
+      "seed": 42,
+      "watermark": false,
+      "first_frame": ["15", 0]
+    },
+    "class_type": "MinimaxHailuo03FirstLastFrameNode",
+    "_meta": {"title": "MiniMax H3 First-Last-Frame to Video"}
+  }
+}
