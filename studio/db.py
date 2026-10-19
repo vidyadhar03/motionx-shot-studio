@@ -35,6 +35,45 @@ CREATE TABLE IF NOT EXISTS media (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS scenes (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  name TEXT NOT NULL,
+  order_idx INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+
+-- Project-scoped Elements. `handle` is how prompts and people refer to it (@oli).
+CREATE TABLE IF NOT EXISTS assets (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  kind TEXT NOT NULL CHECK (kind IN ('character','location','prop')),
+  name TEXT NOT NULL,
+  handle TEXT NOT NULL,
+  current_version INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  UNIQUE (project_id, handle)
+);
+
+-- Immutable. A new image or a changed description is a NEW version; shots pin versions.
+CREATE TABLE IF NOT EXISTS asset_versions (
+  id TEXT PRIMARY KEY,
+  asset_id TEXT NOT NULL REFERENCES assets(id),
+  version INTEGER NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  media_sha TEXT NOT NULL REFERENCES media(sha256),
+  created_at TEXT NOT NULL,
+  UNIQUE (asset_id, version)
+);
+
+CREATE TRIGGER IF NOT EXISTS asset_versions_immutable
+BEFORE UPDATE ON asset_versions
+BEGIN SELECT RAISE(ABORT, 'asset versions are immutable; add a new version'); END;
+
+CREATE TRIGGER IF NOT EXISTS asset_versions_undeletable
+BEFORE DELETE ON asset_versions
+BEGIN SELECT RAISE(ABORT, 'asset versions are never deleted'); END;
+
 CREATE TABLE IF NOT EXISTS shots (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id),
@@ -50,6 +89,10 @@ CREATE TABLE IF NOT EXISTS shots (
   seed INTEGER,                                   -- NULL = fresh random seed per proposal
   start_frame_sha TEXT REFERENCES media(sha256),
   selected_take_id TEXT,
+  scene_id TEXT REFERENCES scenes(id),
+  mode TEXT NOT NULL DEFAULT 'first_frame',      -- first_frame | reference (selects the workflow)
+  aspect_ratio TEXT NOT NULL DEFAULT '16:9',     -- reference mode only; first-frame follows the frame
+  refs TEXT NOT NULL DEFAULT '[]',               -- JSON [{asset_version_id}] in prompt order (Image 1..N)
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -166,9 +209,28 @@ class Database:
         path.parent.mkdir(parents=True, exist_ok=True)
         conn = self.connect()          # executescript manages its own transaction
         try:
+            self._migrate(conn)
             conn.executescript(SCHEMA)
         finally:
             conn.close()
+
+    # Additive, idempotent migrations for databases created by an earlier schema. Columns are
+    # only ever added; nothing existing (takes, snapshots, media) is rewritten.
+    MIGRATIONS = {
+        "shots": [("scene_id", "TEXT REFERENCES scenes(id)"),
+                  ("mode", "TEXT NOT NULL DEFAULT 'first_frame'"),
+                  ("aspect_ratio", "TEXT NOT NULL DEFAULT '16:9'"),
+                  ("refs", "TEXT NOT NULL DEFAULT '[]'")],
+    }
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        for table, cols in self.MIGRATIONS.items():
+            existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+            if not existing:
+                continue                     # fresh database: SCHEMA creates the full table
+            for name, decl in cols:
+                if name not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
     def connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=30, isolation_level=None)

@@ -46,7 +46,7 @@ PRESETS: dict[str, dict[str, str]] = {
 CONTROL_LABELS = {k: {key: key.replace("_", " ") for key in v} for k, v in PRESETS.items()}
 
 
-def compile_prompt(project: dict[str, Any], shot: dict[str, Any]) -> str:
+def compile_prompt(project: dict[str, Any], shot: dict[str, Any], refs: list[dict[str, Any]] | None = None) -> str:
     parts: list[str] = []
     if shot.get("intention"):
         parts.append(shot["intention"].strip().rstrip(".") + ".")
@@ -64,6 +64,15 @@ def compile_prompt(project: dict[str, Any], shot: dict[str, Any]) -> str:
     style = [s for s in style if s]
     if style:
         parts.append("Style: " + "; ".join(style) + ".")
+    if shot.get("mode", "first_frame") == "reference":
+        # H3 addresses reference media by connection order: "Image 1", "Image 2", ...
+        for r in refs or []:
+            desc = (r.get("description") or "").strip().rstrip(".")
+            parts.append(f"{r['label']} is @{r['handle']} ({r['kind']}{': ' + desc if desc else ''}).")
+        parts.append("Keep each referenced character, location and prop consistent with its image. "
+                     "One continuous shot, no cuts, no on-screen text.")
+        return " ".join(parts)
+    # First-frame wording is unchanged from M1, so earlier takes' prompts stay reproducible.
     parts.append("The video begins exactly on the provided first frame. One continuous shot, no cuts, no on-screen text.")
     return " ".join(parts)
 

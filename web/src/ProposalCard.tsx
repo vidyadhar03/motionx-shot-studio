@@ -14,6 +14,8 @@ export default function ProposalCard({ proposal: p, status, onDone, onError }: {
     try { await fn(); onDone(); } catch (e) { onError(e); } finally { setBusy(false); }
   };
   const frame = p.request.start_frame;
+  const refs = p.request.references ?? [];
+  const isRef = p.workflow_id === "h3_reference";
 
   return (
     <section className={`proposal ${p.status}`}>
@@ -24,12 +26,18 @@ export default function ProposalCard({ proposal: p, status, onDone, onError }: {
       {p.status === "stale" && <div className="banner warn">The shot changed after this proposal was made. Propose again to approve the current version.</div>}
       <div className="proposal-body">
         {frame && <img className="thumb" src={media(frame.sha256)} alt="start frame" />}
+        {isRef && (
+          <div className="ref-thumbs">
+            {refs.map((r, i) => <figure key={i}><img src={media(r.sha256)} alt="" /><figcaption>Image {i + 1}</figcaption></figure>)}
+          </div>
+        )}
         <div className="proposal-detail">
           <div className="prompt">{p.resolved_prompt}</div>
           <dl>
-            <dt>Workflow</dt><dd>{p.workflow_id} · MiniMax H3 first frame → video</dd>
-            <dt>Inputs</dt><dd>{frame ? `start frame ${frame.width}×${frame.height} · sha ${frame.sha256.slice(0, 12)}` : "none"}</dd>
-            <dt>Output</dt><dd>{p.request.duration_s}s · {p.request.resolution} · seed {p.request.seed}</dd>
+            <dt>Workflow</dt><dd>{p.workflow_id} · MiniMax H3 {isRef ? "references → video" : "first frame → video"}</dd>
+            <dt>Inputs</dt><dd>{frame ? `start frame ${frame.width}×${frame.height} · sha ${frame.sha256.slice(0, 12)}`
+                               : isRef ? `${refs.length} reference image${refs.length === 1 ? "" : "s"} (Image 1–${refs.length})` : "none"}</dd>
+            <dt>Output</dt><dd>{p.request.duration_s}s · {p.request.resolution}{isRef ? ` · ${p.request.aspect_ratio}` : " · aspect follows frame"} · seed {p.request.seed}</dd>
             <dt>Shot</dt><dd>revision {p.shot_revision}</dd>
             <dt>Cost</dt><dd>{paid ? <>~{p.est_credits.toFixed(1)} credits (≈ ${(p.est_credits / 211).toFixed(2)}) · committed after approval {after.toFixed(0)} / {b.budget_credits} · attempt {b.attempts + 1}/{b.max_attempts}</>
                                     : <>0. The fake adapter makes no network calls ({p.est_credits.toFixed(1)} credits on the real route)</>}</dd>

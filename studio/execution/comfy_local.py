@@ -78,32 +78,53 @@ class ComfyLocalAdapter:
     def describe_binding(self, req: RenderRequest) -> dict[str, Any]:
         m = self.manifest(req.workflow_id)
         b = m.bindings
-        values = {
-            "prompt": req.prompt, "resolution": req.resolution, "duration": req.duration_s,
-            "seed": req.seed, **m.fixed,
-        }
+        values: dict[str, Any] = {"prompt": req.prompt, "resolution": req.resolution, "duration": req.duration_s,
+                                  "seed": req.seed, **m.fixed}
+        if "aspect_ratio" in b and req.aspect_ratio is not None:
+            values["aspect_ratio"] = req.aspect_ratio
         inputs = [{"node": b[k]["node"], "field": b[k]["field"], "value": v} for k, v in values.items()]
+        images: list[dict[str, Any]] = []
         if req.start_frame:
-            inputs.append({"node": b["first_frame"]["node"], "field": b["first_frame"]["field"],
-                           "value": {"asset_sha256": req.start_frame.sha256}})
-        return {"workflow_id": m.id, "workflow_version": m.version, "inputs": inputs,
+            images.append({"node": b["first_frame"]["node"], "field": b["first_frame"]["field"],
+                           "role": "start_frame", "asset_sha256": req.start_frame.sha256})
+        if req.references:
+            rb = b["reference_image"]
+            for n, ref in enumerate(req.references, 1):
+                node = rb["node"] if n == 1 else str(rb["extra_node_base"] + n)
+                images.append({"node": node, "field": rb["field"], "role": "reference", "label": f"Image {n}",
+                               "asset_sha256": ref.sha256, "clone_of": None if n == 1 else rb["node"],
+                               "slot": {"node": rb["slot_node"], "field": rb["slot_field"].format(n=n)}})
+        return {"workflow_id": m.id, "workflow_version": m.version, "inputs": inputs, "images": images,
                 "output_node": b["output"]["node"], "partner_node": m.raw.get("partner_node", False)}
 
-    def _build(self, client: Comfy, req: RenderRequest):
+    def graph_for(self, req: RenderRequest) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """The exact API-format graph for `req`, with image inputs still as placeholders, plus the image
+        bindings to fill. Pure and network-free, so it can be validated offline by ComfyUI itself."""
         m = self.manifest(req.workflow_id)
-        wf = client.workflows.from_json(copy.deepcopy(m.workflow_graph()))
-        for item in self.describe_binding(req)["inputs"]:
-            if isinstance(item["value"], dict) and "asset_sha256" in item["value"]:
-                continue
-            wf.set_input(item["node"], item["field"], item["value"])
-        if req.start_frame:
-            asset = client.assets.from_file(req.start_frame.path)
+        graph = copy.deepcopy(m.workflow_graph())
+        binding = self.describe_binding(req)
+        for item in binding["inputs"]:
+            graph[item["node"]]["inputs"][item["field"]] = item["value"]
+        for img in binding["images"]:
+            if img.get("clone_of"):
+                graph[img["node"]] = copy.deepcopy(graph[img["clone_of"]])
+                graph[img["node"]]["_meta"] = {"title": f"Reference {img['label']}"}
+            if img.get("slot"):
+                graph[img["slot"]["node"]]["inputs"][img["slot"]["field"]] = [img["node"], 0]
+        return graph, binding["images"]
+
+    def _build(self, client: Comfy, req: RenderRequest):
+        graph, images = self.graph_for(req)
+        wf = client.workflows.from_json(graph)
+        paths = {req.start_frame.sha256: req.start_frame.path} if req.start_frame else {}
+        paths.update({r.sha256: r.path for r in req.references})
+        for img in images:
+            asset = client.assets.from_file(paths[img["asset_sha256"]])
             try:
                 asset.commit()          # upload now: a failure here provably created no job
             except (ComfyError, httpx.HTTPError) as e:
-                raise SubmissionRejected(f"start frame upload failed: {_safe(e)}", code="upload_failed") from None
-            b = m.bindings["first_frame"]
-            wf.set_input(b["node"], b["field"], asset)
+                raise SubmissionRejected(f"{img['role']} upload failed: {_safe(e)}", code="upload_failed") from None
+            wf.set_input(img["node"], img["field"], asset)
         return wf
 
     def submit(self, req: RenderRequest, idempotency_key: str) -> str:

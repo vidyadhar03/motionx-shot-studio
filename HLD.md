@@ -94,7 +94,7 @@ The manual controls and the agent create the **same** proposal through the **sam
 
 ## 4. Minimal data model (SQLite)
 
-**Implemented in M1:** Project, Shot, ShotRevision, Proposal, Take (+ take events), Feedback, and a spend ledger. Assets, AssetVersions and Scenes arrive in M2; AgentMessage arrives in M3. All IDs are prefixed random ids. Media is stored content-addressed at `data/media/<sha256>.<ext>`. Rows marked *immutable* are never updated after creation.
+**Implemented:** Project, Scene, Asset, AssetVersion (DB-enforced append-only), Shot (with `mode`, `aspect_ratio`, pinned `refs`), ShotRevision, Proposal, Take (+ take events), Feedback, and a spend ledger. AgentMessage arrives in M3. All IDs are prefixed random ids. Media is stored content-addressed at `data/media/<sha256>.<ext>`. Rows marked *immutable* are never updated after creation.
 
 | Entity | Key fields | Notes |
 |---|---|---|
@@ -291,7 +291,7 @@ take: queued ─► submitting* ─► submitted(job_id) ─► running ─► g
 **Limits (application code, not the agent)**
 
 - **Spend ledger.** A credit reservation is written at approval in the same transaction as the take. Observed charge replaces the reservation once the balance delta is known.
-- **Hard caps.** `STUDIO_BUDGET_CREDITS` (700 this phase) and `STUDIO_MAX_PAID_ATTEMPTS` (5) are checked at approval and at resubmission. A definite pre-job rejection releases its reservation.
+- **Hard caps.** `STUDIO_BUDGET_CREDITS` and `STUDIO_MAX_PAID_ATTEMPTS` (currently 140 / 1, already consumed) are checked at approval and at resubmission. A definite pre-job rejection releases its reservation.
 - **Balance check.** The account balance must cover the estimate before submission. The read goes to `GET api.comfy.org/customers/balance` and is read-only; the app has no purchase path.
 - At most 1 running take.
 - Our own prompt length cap (4,000 characters).
@@ -330,7 +330,7 @@ Copying about 600 lines of patterns is cheaper and safer than untangling any of 
 
 | # | Decision | Default if no answer | Needed by |
 |---|---|---|---|
-| D1 | Provide a Comfy API key with credits (no subscription). Initial phase is capped at 5 paid attempts / 700 credits ≈ $3.32 | blocked: real generation waits for the key | now |
+| D1 | Further paid generation (e.g. the first real reference-to-video take, a real two-take revision) | none authorised; the app refuses paid approvals (1/1 used) | before M5 demo |
 | D2 | LLM for the agent: Anthropic API key and spend cap; the agent stays optional for repo users | Anthropic, Sonnet 5.5 default | Oct 23 |
 | D3 | Public repo owner/name and licence | `motionx-shot-studio`, MIT (matches comfy-sdk and the templates) | before publishing, Oct 28 |
 | D4 | Demo material: which characters, locations and frames we have rights to show (no real likenesses without consent, no private MotionX footage) | CC0/stock or our own generated stills | Oct 24 |

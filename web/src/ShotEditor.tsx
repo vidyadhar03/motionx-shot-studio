@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, media, Presets, Shot } from "./api";
+import { api, Asset, media, Presets, Scene, Shot } from "./api";
 
 export type RevisionContext = { parentTakeId: string; parentNumber: number; note: string };
 
@@ -7,17 +7,19 @@ const TEXT = ["title", "intention", "action"] as const;
 const CONTROLS = [
   ["framing", "Framing"], ["camera_move", "Camera move"], ["lens_look", "Lens look"], ["lighting", "Lighting"],
 ] as const;
-type Draft = Record<string, string | number | null>;
+type Draft = Record<string, string | number | null | string[]>;
 
 const fromShot = (s: Shot): Draft => ({
   title: s.title, intention: s.intention, action: s.action, framing: s.framing, camera_move: s.camera_move,
   lens_look: s.lens_look, lighting: s.lighting, duration_s: s.duration_s, resolution: s.resolution, seed: s.seed,
-  start_frame_sha: s.start_frame_sha,
+  start_frame_sha: s.start_frame_sha, scene_id: s.scene_id, mode: s.mode, aspect_ratio: s.aspect_ratio,
+  refs: s.refs.map((r) => r.asset_version_id),
 });
+const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
-export default function ShotEditor({ shot, presets, revision, onClearRevision, onChanged, onProposed, onError }: {
-  shot: Shot; presets: Presets; revision: RevisionContext | null; onClearRevision: () => void;
-  onChanged: (s: Shot) => void; onProposed: () => void; onError: (e: unknown) => void;
+export default function ShotEditor({ shot, presets, assets, scenes, revision, onClearRevision, onChanged, onProposed, onError }: {
+  shot: Shot; presets: Presets; assets: Asset[]; scenes: Scene[]; revision: RevisionContext | null;
+  onClearRevision: () => void; onChanged: (s: Shot) => void; onProposed: () => void; onError: (e: unknown) => void;
 }) {
   const [draft, setDraft] = useState<Draft>(fromShot(shot));
   const [busy, setBusy] = useState(false);
@@ -25,23 +27,29 @@ export default function ShotEditor({ shot, presets, revision, onClearRevision, o
   useEffect(() => setDraft(fromShot(shot)), [shot]);
 
   const base = useMemo(() => fromShot(shot), [shot]);
-  const changes = Object.fromEntries(Object.entries(draft).filter(([k, v]) => (v ?? null) !== (base[k] ?? null)));
+  const changes = Object.fromEntries(Object.entries(draft).filter(([k, v]) => !same(v, base[k])));
   const dirty = Object.keys(changes).length > 0;
-  const set = (k: string, v: string | number | null) => setDraft({ ...draft, [k]: v === "" ? null : v });
+  const set = (k: string, v: Draft[string]) => setDraft((d) => ({ ...d, [k]: v === "" ? null : v }));
+
+  // Every asset version, so a pinned older version still resolves after the asset moves on.
+  const versions = useMemo(() => new Map(assets.flatMap((a) => a.versions.map((v) => [v.id, { asset: a, v }] as const))), [assets]);
+  const refs = (draft.refs as string[]) ?? [];
+  const mode = draft.mode as string;
+  const frame = draft.start_frame_sha as string | null;
 
   const save = async (): Promise<Shot | null> => {
     if (!dirty) return shot;
-    const s = await api.patchShot(shot.id, shot.revision, changes).catch((e) => { onError(e); return null; });
+    const payload = { ...changes } as Record<string, unknown>;
+    if ("refs" in payload) payload.refs = refs.map((id) => ({ asset_version_id: id }));
+    const s = await api.patchShot(shot.id, shot.revision, payload).catch((e) => { onError(e); return null; });
     if (s) onChanged(s);
     return s;
   };
 
   const upload = async (file: File) => {
     setBusy(true);
-    try {
-      const m = await api.upload(file);
-      setDraft((d) => ({ ...d, start_frame_sha: m.sha256 }));
-    } catch (e) { onError(e); } finally { setBusy(false); }
+    try { const m = await api.upload(file); set("start_frame_sha", m.sha256); }
+    catch (e) { onError(e); } finally { setBusy(false); }
   };
 
   const propose = async () => {
@@ -54,8 +62,16 @@ export default function ShotEditor({ shot, presets, revision, onClearRevision, o
     } catch (e) { onError(e); } finally { setBusy(false); }
   };
 
-  const frame = draft.start_frame_sha as string | null;
+  const addRef = (assetId: string) => {
+    const a = assets.find((x) => x.id === assetId);
+    if (a) set("refs", [...refs, a.versions[0].id]);          // pins the asset's current version
+  };
+  const move = (i: number, d: number) => {
+    const next = [...refs]; const [x] = next.splice(i, 1); next.splice(i + d, 0, x); set("refs", next);
+  };
+  const usedAssets = new Set(refs.map((id) => versions.get(id)?.asset.id));
   const last = shot.revisions[0];
+  const conflict = !!frame && refs.length > 0;
 
   return (
     <section className="editor">
@@ -70,17 +86,69 @@ export default function ShotEditor({ shot, presets, revision, onClearRevision, o
           <button className="small ghost" onClick={onClearRevision}>Cancel revision</button>
         </div>
       )}
-      <div className="editor-grid">
-        <div className={`dropzone ${drag ? "drag" : ""}`}
-             onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
-             onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) upload(f); }}>
-          {frame ? <img src={media(frame)} alt="start frame" /> :
-            <div className="placeholder">Drop a start frame<br /><small>PNG/JPEG/WEBP · ≥256px · aspect 2:5–5:2</small></div>}
-          <label className="file-btn">{frame ? "Replace frame" : "Choose image"}
-            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
-          </label>
-          {frame && <code className="sha" title={frame}>sha {frame.slice(0, 12)}</code>}
+      <div className="mode-row">
+        <div className="segmented">
+          <button className={mode === "first_frame" ? "on" : ""} onClick={() => set("mode", "first_frame")}>Start frame → video</button>
+          <button className={mode === "reference" ? "on" : ""} onClick={() => set("mode", "reference")}>References → video</button>
         </div>
+        <label className="inline">Scene
+          <select value={(draft.scene_id as string) ?? ""} onChange={(e) => set("scene_id", e.target.value)}>
+            <option value="">No scene</option>
+            {scenes.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </label>
+      </div>
+      {conflict && (
+        <div className="banner warn">
+          MiniMax H3 can't use a start frame and reference images in the same generation.
+          {" "}<button className="small ghost" onClick={() => set("refs", [])}>Remove references</button>
+          {" "}<button className="small ghost" onClick={() => set("start_frame_sha", null)}>Remove start frame</button>
+        </div>
+      )}
+      <div className="editor-grid">
+        {mode === "first_frame" ? (
+          <div className={`dropzone ${drag ? "drag" : ""}`}
+               onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
+               onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) upload(f); }}>
+            {frame ? <img src={media(frame)} alt="start frame" /> :
+              <div className="placeholder">Drop a start frame<br /><small>PNG/JPEG/WEBP · ≥256px · aspect 2:5–5:2</small></div>}
+            <label className="file-btn">{frame ? "Replace frame" : "Choose image"}
+              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
+            </label>
+            {frame && <code className="sha" title={frame}>sha {frame.slice(0, 12)}</code>}
+          </div>
+        ) : (
+          <div className="refs">
+            <div className="hint">The model sees these as Image 1…{presets.reference.max_images}, in this order. Each one is pinned to an asset version.</div>
+            {refs.map((id, i) => {
+              const hit = versions.get(id);
+              if (!hit) return <div key={id} className="ref missing">Unknown version {id}</div>;
+              const { asset, v } = hit;
+              const newer = asset.current_version > v.version;
+              return (
+                <div key={id} className="ref">
+                  <span className="label">Image {i + 1}</span>
+                  <img src={media(v.media_sha)} alt="" />
+                  <div className="ref-text"><strong>@{asset.handle}</strong> <span className="muted">{asset.kind} · v{v.version}</span>
+                    <div className="muted clip1">{v.description}</div>
+                    {newer && <button className="small badge-btn" onClick={() => set("refs", refs.map((x) => x === id ? asset.versions[0].id : x))}>
+                      v{asset.current_version} available → use it</button>}
+                  </div>
+                  <div className="ref-actions">
+                    <button className="small ghost" disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
+                    <button className="small ghost" disabled={i === refs.length - 1} onClick={() => move(i, 1)}>↓</button>
+                    <button className="small ghost" onClick={() => set("refs", refs.filter((x) => x !== id))}>✕</button>
+                  </div>
+                </div>
+              );
+            })}
+            <select value="" onChange={(e) => e.target.value && addRef(e.target.value)} disabled={refs.length >= presets.reference.max_images}>
+              <option value="">+ Add reference ({refs.length}/{presets.reference.max_images})</option>
+              {assets.filter((a) => !usedAssets.has(a.id)).map((a) => <option key={a.id} value={a.id}>@{a.handle} · {a.kind} · v{a.current_version}</option>)}
+            </select>
+            {!assets.length && <p className="muted">Create assets in the sidebar first.</p>}
+          </div>
+        )}
 
         <div className="form">
           {TEXT.map((k) => (
@@ -110,6 +178,12 @@ export default function ShotEditor({ shot, presets, revision, onClearRevision, o
               <select value={draft.resolution as string} onChange={(e) => set("resolution", e.target.value)}>
                 <option value="768P">768P</option><option value="2K">2K</option>
               </select></label>
+            {mode === "reference"
+              ? <label>Aspect
+                  <select value={draft.aspect_ratio as string} onChange={(e) => set("aspect_ratio", e.target.value)}>
+                    {presets.reference.aspect_ratios.map((a) => <option key={a}>{a}</option>)}
+                  </select></label>
+              : <label>Aspect<input disabled value="follows frame" /></label>}
             <label>Seed <input placeholder="random" value={(draft.seed as number | null) ?? ""} inputMode="numeric"
                                onChange={(e) => set("seed", e.target.value === "" ? null : Number(e.target.value))} /></label>
           </div>

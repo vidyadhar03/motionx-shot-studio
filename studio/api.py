@@ -61,6 +61,23 @@ class SelectIn(BaseModel):
     take_id: str | None
 
 
+class SceneIn(BaseModel):
+    name: str
+
+
+class AssetIn(BaseModel):
+    kind: str
+    name: str
+    handle: str
+    description: str = ""
+    media_sha: str
+
+
+class AssetVersionIn(BaseModel):
+    description: str | None = None
+    media_sha: str | None = None
+
+
 class ResolveIn(BaseModel):
     job_id: str | None = None
     resubmit: bool = False
@@ -126,8 +143,11 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
 
     @app.get("/api/presets")
     def presets() -> dict:
+        ref = adapter.manifest("h3_reference").capabilities
         return {"presets": {k: list(v) for k, v in PRESETS.items()}, "labels": CONTROL_LABELS,
-                "descriptions": PRESETS, "calibrated": False}
+                "descriptions": PRESETS, "calibrated": False,
+                "reference": {"max_images": ref.reference_images,
+                              "aspect_ratios": sorted(ref.aspect_ratios or [], key=lambda a: (a != "16:9", a))}}
 
     # -- projects ---------------------------------------------------------------------------
     @app.get("/api/projects")
@@ -140,7 +160,33 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
 
     @app.get("/api/projects/{pid}")
     def get_project(pid: str) -> dict:
-        return {**ops.get_project(pid), "shots": ops.list_shots(pid)}
+        return {**ops.get_project(pid), "shots": ops.list_shots(pid), "scenes": ops.list_scenes(pid)}
+
+    # -- scenes and assets ------------------------------------------------------------------
+    @app.post("/api/projects/{pid}/scenes", status_code=201)
+    def create_scene(pid: str, body: SceneIn) -> dict:
+        return ops.create_scene(pid, body.name)
+
+    @app.patch("/api/scenes/{scene_id}")
+    def rename_scene(scene_id: str, body: SceneIn) -> dict:
+        return ops.rename_scene(scene_id, body.name)
+
+    @app.get("/api/projects/{pid}/assets")
+    def list_assets(pid: str) -> list[dict]:
+        return ops.list_assets(pid)
+
+    @app.post("/api/projects/{pid}/assets", status_code=201)
+    def create_asset(pid: str, body: AssetIn) -> dict:
+        return ops.create_asset(pid, kind=body.kind, name=body.name, handle=body.handle,
+                                description=body.description, media_sha=body.media_sha)
+
+    @app.get("/api/assets/{aid}")
+    def get_asset(aid: str) -> dict:
+        return ops.get_asset(aid)
+
+    @app.post("/api/assets/{aid}/versions", status_code=201)
+    def add_version(aid: str, body: AssetVersionIn) -> dict:
+        return ops.add_asset_version(aid, description=body.description, media_sha=body.media_sha)
 
     @app.patch("/api/projects/{pid}")
     def patch_project(pid: str, body: ProjectPatch) -> dict:

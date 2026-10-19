@@ -1,12 +1,23 @@
 export type Direction = { tone?: string; era?: string; palette?: string; notes?: string };
 export type Project = { id: string; name: string; brief: string; direction: Direction; created_at: string };
-export type ShotSummary = { id: string; title: string; scene: string; order_idx: number; revision: number; take_count: number };
+export type ShotSummary = { id: string; title: string; scene: string; scene_id: string | null; mode: string;
+                            order_idx: number; revision: number; take_count: number };
+export type Scene = { id: string; project_id: string; name: string; order_idx: number };
+export type AssetVersion = { id: string; asset_id: string; version: number; description: string; media_sha: string;
+                             width: number; height: number; created_at: string };
+export type Asset = { id: string; project_id: string; kind: "character" | "location" | "prop"; name: string; handle: string;
+                      current_version: number; versions: AssetVersion[] };
+export type RefResolved = { asset_version_id: string; asset_id: string; version: number; latest_version: number;
+                            description: string; media_sha: string; kind: string; name: string; handle: string;
+                            width: number; height: number; label: string };
 
 export type Shot = {
   id: string; project_id: string; revision: number; scene: string; title: string; intention: string; action: string;
   framing: string | null; camera_move: string | null; lens_look: string | null; lighting: string | null;
   duration_s: number; resolution: string; seed: number | null; start_frame_sha: string | null;
   selected_take_id: string | null; proposals: Proposal[]; takes: Take[];
+  scene_id: string | null; mode: "first_frame" | "reference"; aspect_ratio: string;
+  refs: { asset_version_id: string }[]; refs_resolved: RefResolved[];
   revisions: { revision: number; author: string; at: string }[];
 };
 
@@ -14,7 +25,9 @@ export type Proposal = {
   id: string; shot_id: string; shot_revision: number; workflow_id: string; resolved_prompt: string;
   est_credits: number; adapter: string; is_paid: number; created_by: string; note: string;
   parent_take_id: string | null; status: string; created_at: string;
-  request: { seed: number; duration_s: number; resolution: string; start_frame: { sha256: string; width: number; height: number } | null };
+  request: { seed: number; duration_s: number; resolution: string; aspect_ratio: string | null;
+             start_frame: { sha256: string; width: number; height: number } | null;
+             references: { sha256: string; width: number; height: number }[] };
 };
 
 export type Take = {
@@ -34,7 +47,8 @@ export type Status = {
 };
 
 export type Presets = { presets: Record<string, string[]>; labels: Record<string, Record<string, string>>;
-                        descriptions: Record<string, Record<string, string>> };
+                        descriptions: Record<string, Record<string, string>>;
+                        reference: { max_images: number; aspect_ratios: string[] } };
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -55,7 +69,13 @@ export const api = {
   balance: () => call<{ credits: number | null; key_configured: boolean }>("GET", "/api/balance"),
   presets: () => call<Presets>("GET", "/api/presets"),
   projects: () => call<Project[]>("GET", "/api/projects"),
-  project: (id: string) => call<Project & { shots: ShotSummary[] }>("GET", `/api/projects/${id}`),
+  project: (id: string) => call<Project & { shots: ShotSummary[]; scenes: Scene[] }>("GET", `/api/projects/${id}`),
+  createScene: (pid: string, name: string) => call<Scene>("POST", `/api/projects/${pid}/scenes`, { name }),
+  assets: (pid: string) => call<Asset[]>("GET", `/api/projects/${pid}/assets`),
+  createAsset: (pid: string, body: { kind: string; name: string; handle: string; description: string; media_sha: string }) =>
+    call<Asset>("POST", `/api/projects/${pid}/assets`, body),
+  addVersion: (aid: string, body: { description?: string; media_sha?: string }) =>
+    call<Asset>("POST", `/api/assets/${aid}/versions`, body),
   createProject: (name: string) => call<Project>("POST", "/api/projects", { name }),
   patchProject: (id: string, patch: Partial<Project>) => call<Project>("PATCH", `/api/projects/${id}`, patch),
   upload: (file: File) => { const f = new FormData(); f.append("file", file); return call<{ sha256: string }>("POST", "/api/media", f); },

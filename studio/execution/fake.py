@@ -65,7 +65,10 @@ class FakeAdapter:
         m = self.manifest(req.workflow_id)
         return {"workflow_id": m.id, "workflow_version": m.version, "fake": True,
                 "inputs": {"prompt": req.prompt, "duration": req.duration_s, "resolution": req.resolution,
-                           "seed": req.seed, "start_frame_sha256": req.start_frame.sha256 if req.start_frame else None}}
+                           "seed": req.seed, "aspect_ratio": req.aspect_ratio,
+                           "start_frame_sha256": req.start_frame.sha256 if req.start_frame else None,
+                           "references": [{"label": f"Image {n}", "sha256": r.sha256}
+                                          for n, r in enumerate(req.references, 1)]}}
 
     def submit(self, req: RenderRequest, idempotency_key: str) -> str:
         with self._lock:
@@ -115,7 +118,8 @@ class FakeAdapter:
         return self._render(job["request"])
 
     def _render(self, request: dict[str, Any]) -> bytes:
-        frame = (request.get("start_frame") or {}).get("path")
+        # Reference mode has no start frame: the placeholder animates Image 1 instead.
+        frame = (request.get("start_frame") or (request.get("references") or [None])[0] or {}).get("path")
         if self.render == "ffmpeg" and frame and shutil.which("ffmpeg"):
             seed = int(request.get("seed", 0))
             zoom = "min(zoom+0.0025,1.35)" if seed % 2 == 0 else "if(eq(on,1),1.35,max(zoom-0.0025,1))"

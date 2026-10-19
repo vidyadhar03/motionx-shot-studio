@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { ACTIVE, api, Presets, Project, Shot, ShotSummary, Status } from "./api";
+import { ACTIVE, api, Asset, Presets, Project, Scene, Shot, ShotSummary, Status } from "./api";
+import AssetsPanel from "./AssetsPanel";
 import ShotEditor, { RevisionContext } from "./ShotEditor";
 import ProposalCard from "./ProposalCard";
 import TakeCard from "./TakeCard";
@@ -10,7 +11,8 @@ export default function App() {
   const [balance, setBalance] = useState<number | null>(null);
   const [presets, setPresets] = useState<Presets | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [project, setProject] = useState<(Project & { shots: ShotSummary[] }) | null>(null);
+  const [project, setProject] = useState<(Project & { shots: ShotSummary[]; scenes: Scene[] }) | null>(null);
+  const [assets, setAssets] = useState<Asset[]>([]);
   const [shot, setShot] = useState<Shot | null>(null);
   const [revision, setRevision] = useState<RevisionContext | null>(null);
   const [compare, setCompare] = useState<string[]>([]);
@@ -19,7 +21,10 @@ export default function App() {
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
 
   const refreshStatus = useCallback(() => api.status().then(setStatus).catch(fail), []);
-  const refreshProject = useCallback((id: string) => api.project(id).then(setProject).catch(fail), []);
+  const refreshProject = useCallback((id: string) => {
+    api.project(id).then(setProject).catch(fail);
+    api.assets(id).then(setAssets).catch(fail);
+  }, []);
   const refreshShot = useCallback((id: string) => api.shot(id).then(setShot).catch(fail), []);
 
   useEffect(() => {
@@ -46,9 +51,17 @@ export default function App() {
     setShot(null);
   };
 
-  const newShot = async () => {
+  const newScene = async () => {
     if (!project) return;
-    const s = await api.createShot(project.id, { title: `Shot ${project.shots.length + 1}` }).catch(fail);
+    const name = prompt("Scene name", `Scene ${project.scenes.length + 1}`);
+    if (!name) return;
+    await api.createScene(project.id, name).catch(fail);
+    refreshProject(project.id);
+  };
+
+  const newShot = async (sceneId: string | null = null) => {
+    if (!project) return;
+    const s = await api.createShot(project.id, { title: `Shot ${project.shots.length + 1}`, scene_id: sceneId }).catch(fail);
     if (!s) return;
     setShot(s);
     refreshProject(project.id);
@@ -86,16 +99,33 @@ export default function App() {
           {project ? (
             <>
               <ProjectPanel project={project} onSaved={(p) => setProject({ ...project, ...p })} onError={fail} />
-              <div className="section-title">Shots <button className="small" onClick={newShot}>+ Shot</button></div>
-              <ul className="shot-list">
-                {project.shots.map((s) => (
-                  <li key={s.id} className={shot?.id === s.id ? "active" : ""} onClick={() => openShot(s.id)}>
-                    <span className="num">{s.order_idx}</span>
-                    <span className="title">{s.title || "Untitled shot"}</span>
-                    <span className="count">{s.take_count} take{s.take_count === 1 ? "" : "s"}</span>
-                  </li>
-                ))}
-              </ul>
+              <div className="section-title">Shots
+                <button className="small ghost" onClick={newScene}>+ Scene</button>
+                <button className="small" onClick={() => newShot()}>+ Shot</button></div>
+              {[...project.scenes.map((sc) => ({ id: sc.id as string | null, name: sc.name })), { id: null, name: "Unassigned" }]
+                .map((group) => {
+                  const shots = project.shots.filter((s) => (s.scene_id ?? null) === group.id);
+                  if (group.id === null && !shots.length && project.scenes.length) return null;
+                  return (
+                    <div key={group.id ?? "none"} className="scene-group">
+                      {project.scenes.length > 0 && (
+                        <div className="scene-name">{group.name}
+                          {group.id && <button className="small ghost" onClick={() => newShot(group.id)}>+</button>}</div>
+                      )}
+                      <ul className="shot-list">
+                        {shots.map((s) => (
+                          <li key={s.id} className={shot?.id === s.id ? "active" : ""} onClick={() => openShot(s.id)}>
+                            <span className="num">{s.order_idx}</span>
+                            <span className="title">{s.title || "Untitled shot"}</span>
+                            <span className="mode-tag">{s.mode === "reference" ? "REF" : "FRAME"}</span>
+                            <span className="count">{s.take_count} take{s.take_count === 1 ? "" : "s"}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
+              <AssetsPanel projectId={project.id} assets={assets} onChanged={() => refreshProject(project.id)} onError={fail} />
             </>
           ) : (
             <div className="empty">Create a project to start.<br /><button onClick={newProject}>New project</button></div>
@@ -103,10 +133,10 @@ export default function App() {
         </aside>
 
         <main className="main">
-          {!shot && project && <div className="empty big">Select a shot or add one.<br /><button onClick={newShot}>+ Shot</button></div>}
+          {!shot && project && <div className="empty big">Select a shot or add one.<br /><button onClick={() => newShot()}>+ Shot</button></div>}
           {shot && presets && status && (
             <>
-              <ShotEditor key={shot.id} shot={shot} presets={presets} revision={revision}
+              <ShotEditor key={shot.id} shot={shot} presets={presets} revision={revision} assets={assets} scenes={project?.scenes ?? []}
                           onClearRevision={() => setRevision(null)} onChanged={onShotChanged} onError={fail}
                           onProposed={() => refreshShot(shot.id)} />
               {(pending || latestProposal?.status === "rejected") && (

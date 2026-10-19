@@ -65,7 +65,8 @@ class RenderRequest:
     resolution: str
     seed: int
     start_frame: ImageInput | None = None
-    references: tuple[ImageInput, ...] = ()
+    references: tuple[ImageInput, ...] = ()     # prompt order: references[0] is "Image 1"
+    aspect_ratio: str | None = None              # reference mode; first-frame output follows the frame
 
     def to_json(self) -> dict[str, Any]:
         d = asdict(self)
@@ -94,6 +95,8 @@ class Capabilities:
     resolutions: frozenset[str]
     seed_max: int
     max_prompt_chars: int        # OUR operational limit, not a documented provider limit
+    reference_images_min: int = 0
+    aspect_ratios: frozenset[str] | None = None   # None: the output follows the start frame
 
     def validate(self, req: RenderRequest) -> None:
         if not req.prompt.strip():
@@ -109,13 +112,27 @@ class Capabilities:
                                      f"use one of {', '.join(sorted(self.resolutions))}")
         if not (0 <= req.seed <= self.seed_max):
             raise UnsupportedRequest(f"seed must be between 0 and {self.seed_max}")
+        if req.start_frame is not None and req.references:
+            raise UnsupportedRequest(
+                "MiniMax H3 cannot combine a start frame with reference images in one generation. Use Start "
+                "frame mode without references, or Reference mode without a start frame (to get both, make "
+                "the start frame from the references first)")
         if self.start_frame == "required" and req.start_frame is None:
             raise UnsupportedRequest(f"{req.workflow_id} needs a start frame: upload one to the shot")
         if self.start_frame == "not_supported" and req.start_frame is not None:
-            raise UnsupportedRequest(f"{req.workflow_id} cannot take a start frame")
+            raise UnsupportedRequest(f"{req.workflow_id} cannot take a start frame; remove it or switch to "
+                                     "Start frame mode")
         if len(req.references) > self.reference_images:
-            raise UnsupportedRequest(f"{len(req.references)} reference images given; {req.workflow_id} "
-                                     f"accepts at most {self.reference_images}")
+            raise UnsupportedRequest(
+                f"{len(req.references)} reference images given; {req.workflow_id} accepts at most "
+                f"{self.reference_images}" if self.reference_images else
+                f"{req.workflow_id} takes no reference images; switch to Reference mode or remove them")
+        if len(req.references) < self.reference_images_min:
+            raise UnsupportedRequest(f"{req.workflow_id} needs at least {self.reference_images_min} reference "
+                                     "image: add a character, location or prop to the shot")
+        if self.aspect_ratios is not None and req.aspect_ratio not in self.aspect_ratios:
+            raise UnsupportedRequest(f"aspect ratio {req.aspect_ratio!r} is not supported; use one of "
+                                     f"{', '.join(sorted(self.aspect_ratios))}")
         images = ([("start frame", req.start_frame)] if req.start_frame else []) + \
                  [(f"reference {i}", r) for i, r in enumerate(req.references, 1)]
         for label, im in images:
@@ -147,9 +164,13 @@ class Manifest:
     def fixed(self) -> dict[str, Any]:
         return self.raw.get("fixed", {})
 
-    def credits_estimate(self, duration_s: int, resolution: str) -> float:
+    def credits_estimate(self, duration_s: int, resolution: str, n_images: int = 0) -> float:
         p = self.raw["pricing"]
-        return round(duration_s * p["usd_per_second"][resolution] * p["credits_per_usd"], 2)
+        usd = duration_s * p["usd_per_second"][resolution]
+        extra = p.get("usd_per_image_over")
+        if extra and n_images > extra["threshold"]:
+            usd += (n_images - extra["threshold"]) * extra["usd"]
+        return round(usd * p["credits_per_usd"], 2)
 
     def workflow_graph(self) -> dict[str, Any]:
         return json.loads(self.workflow_path.read_text())
@@ -171,6 +192,8 @@ class Manifest:
             resolutions=frozenset(c["resolutions"]),
             seed_max=int(c["seed"]["max"]),
             max_prompt_chars=int(c["max_prompt_chars"]),
+            reference_images_min=int(c.get("reference_images_min", 0)),
+            aspect_ratios=frozenset(c["aspect_ratios"]) if c.get("aspect_ratios") else None,
         )
         return cls(id=raw["id"], version=int(raw["version"]), mode=raw["mode"],
                    workflow_path=workflows_dir / raw["workflow_file"], raw=raw, capabilities=caps)

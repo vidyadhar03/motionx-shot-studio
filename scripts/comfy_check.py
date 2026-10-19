@@ -1,10 +1,13 @@
 """Zero-cost checks of the real execution route. Never purchases anything, never runs a paid job.
 
   python scripts/comfy_check.py versions   # ComfyUI / proxy / SDK versions and node availability
-  python scripts/comfy_check.py probe      # submit the real H3 graph WITHOUT a Partner key:
-                                           # proves SDK -> proxy -> ComfyUI -> node 28 wiring; the
-                                           # node must refuse with "Unauthorized" (nothing billed)
+  python scripts/comfy_check.py probe      # submit the real H3 graph WITHOUT a Partner key. NOT offline:
+                                           # the node makes an unauthenticated request that api.comfy.org
+                                           # rejects with 401 ("Unauthorized"); no account, nothing billed
   python scripts/comfy_check.py balance    # read-only credit balance for COMFY_API_KEY (from .env)
+  python scripts/comfy_check.py graphs     # OFFLINE: build the adapter's real graphs (first frame; 1, 3, 9
+                                           # references) and validate them with ComfyUI's validate_prompt.
+                                           # Executes nothing, no network, no key.
 
 Paid generation happens only through the app's proposal -> approval flow, under its spend limits.
 """
@@ -59,6 +62,37 @@ def balance(s: Settings) -> None:
           else f"{credits} credits (≈ ${credits / 211:.2f})")
 
 
+def graphs(s: Settings) -> None:
+    import json, shutil, subprocess, tempfile
+    from studio.execution.base import ImageInput as I
+    a = ComfyLocalAdapter(s.comfy_base_url, None, s.workflows_dir, s.comfyui_url)
+    frame = ROOT / "samples" / "frame_cc0.png"
+    inp = ROOT / "runtime" / "ComfyUI" / "input"
+    shutil.copy(frame, inp / "msx_offline_check.png")
+    ref = I("ref", frame, "image/png", 1344, 768)
+    cases = {
+        "first_frame": RenderRequest("h3_first_frame", "first_frame", "check", 5, "768P", 1, start_frame=ref),
+        **{f"reference_x{n}": RenderRequest("h3_reference", "reference", "check", 5, "768P", 1,
+                                             references=tuple([ref] * n), aspect_ratio="16:9") for n in (1, 3, 9)},
+    }
+    with tempfile.TemporaryDirectory() as d:
+        files = []
+        for name, req in cases.items():
+            graph, images = a.graph_for(req)
+            for img in images:
+                graph[img["node"]]["inputs"][img["field"]] = "msx_offline_check.png"
+            f = Path(d) / f"{name}.json"
+            f.write_text(json.dumps(graph))
+            files.append(str(f))
+        py = ROOT / "runtime" / "ComfyUI" / ".venv" / "bin" / "python"
+        out = subprocess.run([str(py), str(ROOT / "scripts" / "validate_graph.py"), *files],
+                             capture_output=True, text=True)
+        for line in out.stdout.splitlines():
+            if line.startswith("{"):
+                r = json.loads(line)
+                print(f"{r['graph']:<24} {'VALID' if r['valid'] else 'INVALID ' + json.dumps(r['node_errors'])[:300]}")
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "versions"
-    {"versions": versions, "probe": probe, "balance": balance}[cmd](Settings.from_env())
+    {"versions": versions, "probe": probe, "balance": balance, "graphs": graphs}[cmd](Settings.from_env())

@@ -27,9 +27,9 @@ No `AGENTS.md` or `CLAUDE.md` exists in spike, video-harness, locvis or location
 
 | # | Dates | Deliverable | Status |
 |---|---|---|---|
-| **M0** | Mon 19 – Tue 20 | Local execution stack installed and pinned. API-format H3 first-frame workflow and manifest. Repo scaffold. Fake adapter. Zero-cost route probe | **Done** (fake + probe). The paid smoke run is blocked on `COMFY_API_KEY` (§3, step 6) |
-| **M1** | Tue 20 – Thu 22 | Vertical slice: upload frame → shot → proposal → approval → take → feedback → second take, both retained | **Done with the fake adapter** (§5). The real two-take run waits for the key |
-| **M2** | Fri 23 – Sat 24 | Assets with immutable versions, scenes, the reference path (`h3_reference` via `MinimaxHailuo03ReferenceNode`, 1–9 images, "Image N" binding), capability errors in the UI | Planned. Reference-to-video stays here |
+| **M0** | Mon 19 – Tue 20 | Local execution stack installed and pinned. API-format H3 first-frame workflow and manifest. Repo scaffold. Fake adapter. Zero-cost route probe | **Done. Real first-frame execution verified**: one paid H3 take on 2026-10-20 (`docs/RUNS.md`) |
+| **M1** | Tue 20 – Thu 22 | Vertical slice: upload frame → shot → proposal → approval → take → feedback → second take, both retained | **Done.** The revision flow (feedback → second take → compare) is verified with **fake outputs**. Only **one real take** exists; a real second take hasn't been run |
+| **M2** | Fri 23 – Sat 24 | Project-scoped Character/Location/Prop assets with immutable versions, scenes, the reference path (`h3_reference` via `MinimaxHailuo03ReferenceNode`, 1–9 images, "Image N" binding), capability errors in the UI | **Done (2026-10-20) on the fake adapter plus offline ComfyUI graph validation.** No real reference-to-video generation has run (§5b) |
 | **M3** | Sun 25 – Mon 26 | Agent: one loop, 4 tools (`list`, `read`, `write`, `propose_generation`), `skills/shot-direction.md`, persisted thread. The agent can propose and can't approve | Planned. `generation.py` already separates `create_proposal` (agent-safe) from `approve` (human HTTP route only) |
 | **M4** | Tue 27 – Wed 28 | Export (selected MP4s + manifest), cancel, README check from a clean clone | Planned |
 | **M5** | Thu 29 | Demo project with licensed inputs, demo video, publish (needs approval), submit | Planned |
@@ -53,9 +53,11 @@ There was no existing ComfyUI, Comfy Desktop, comfy-cli or Comfy API key on this
 1. `./scripts/setup_comfy.sh`: clones ComfyUI v0.42.1 into `runtime/` and installs its requirements.
 2. `uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e ".[dev]"`
 3. `./scripts/run_comfy.sh`: ComfyUI on 127.0.0.1:8188 and `comfy-api-proxy run --state-dir runtime/proxy-state` on 127.0.0.1:8189.
-4. `.venv/bin/python scripts/comfy_check.py versions` and then `probe`. FACT 2026-10-20: the probe submits the real graph without a key. ComfyUI accepts it and node 28 refuses with `Unauthorized: Please login first to use this node.` No account is involved, so nothing is billed.
-5. 👤 Create an API key at `https://platform.comfy.org/profile/api-keys` (shown once) and put it in `.env` as `COMFY_API_KEY=comfyui-…`. `.env` is gitignored.
-6. 👤 Credits: check the balance with `scripts/comfy_check.py balance` (read-only `GET api.comfy.org/customers/balance`). If it's below ~136 credits, top up in ComfyUI **Settings → Workspace → Plan & Credits** or at platform.comfy.org. **Minimum top-up: not published.** The support article says to select a preset or enter a custom amount. Rate: **$1 = 211 credits** (FACT, Comfy support). Top-ups expire after 1 year and aren't refundable. A negative balance blocks Partner Nodes.
+4. `.venv/bin/python scripts/comfy_check.py versions`, then `graphs`.
+   - `graphs` is **offline**: it builds the adapter's real graphs (first frame; 1, 3 and 9 references) and validates them with ComfyUI's own `execution.validate_prompt` in-process (`scripts/validate_graph.py`). It executes nothing and makes no network call.
+   - The older `probe` submits a real graph **without** a key. Correction: that isn't offline. The Partner Node sends an *unauthenticated* request to api.comfy.org, which answers HTTP 401 (`Unauthorized: Please login first to use this node.`). No account is involved, so nothing can be billed, but use `graphs` when an offline check is required.
+5. 👤 API key from `https://platform.comfy.org/profile/api-keys` (shown once), stored in `.env` as `COMFY_API_KEY=comfyui-…`. `.env` is gitignored. **Configured on this machine.**
+6. 👤 Credits: check with `scripts/comfy_check.py balance` (read-only `GET api.comfy.org/customers/balance`). After run 1 the balance was 919.22 credits. A take needs ~136 credits; to top up, go in ComfyUI **Settings → Workspace → Plan & Credits** or at platform.comfy.org. **Minimum top-up: not published.** The support article says to select a preset or enter a custom amount. Rate: **$1 = 211 credits** (FACT, Comfy support). Top-ups expire after 1 year and aren't refundable. A negative balance blocks Partner Nodes.
 7. Set `STUDIO_ADAPTER=comfy_local` in `.env`, then run `./scripts/run_app.sh` and open http://127.0.0.1:8700.
 
 **Workflow and manifest.**
@@ -68,15 +70,10 @@ There was no existing ComfyUI, Comfy Desktop, comfy-cli or Comfy API key on this
 
 - The node's own price badge in `comfy_api_nodes/nodes_minimax.py` gives H3 768P at **$0.1287/s** and 2K at $0.1859/s. Comfy's pricing page lists 27.16 credits/s.
 - A 5 s 768P take is therefore **≈ 135.8 credits ≈ $0.64**.
-- This phase's cap (5 attempts / 700 credits) allows at most 5 such takes, and the app enforces it.
+- Observed on run 1: **135.78 credits**, exactly the estimate.
 - Comfy notes that Partner Nodes sometimes post cost after execution, so the observed charge is a balance delta that can be re-read with `POST /api/takes/{id}/reconcile`.
 
-**Paid run protocol (when the key exists).**
-
-1. Run one 5 s 768P take through the UI.
-2. Compare `observed_credits` with the 135.8 estimate.
-3. Continue to take 2 only if the observed charge is ≤ the estimate plus a small margin and the cumulative total stays ≤ 700.
-4. Stop if the charge can't be established from the balance delta within the cap.
+**Paid allowance.** The current authorisation is 1 attempt / 140 credits, and it is **consumed** (run 1: 135.78 credits). `.env` sets `STUDIO_MAX_PAID_ATTEMPTS=1` and `STUDIO_BUDGET_CREDITS=140`, so the app refuses any further paid approval (HTTP 402). Further spending requires explicit approval; development continues on the fake adapter.
 
 ## 4. M0/M1 implementation (done)
 
@@ -100,7 +97,7 @@ There was no existing ComfyUI, Comfy Desktop, comfy-cli or Comfy API key on this
 
 ## 5. Acceptance criteria (M1) and results
 
-All of these are **fake-adapter or offline results** unless marked otherwise. No paid generation has run.
+All of these are **fake-adapter or offline results** unless marked otherwise. Criterion 11 is the one real hosted run.
 
 | # | Criterion | Result |
 |---|---|---|
@@ -115,6 +112,38 @@ All of these are **fake-adapter or offline results** unless marked otherwise. No
 | 9 | No secret in the DB, media, logs or snapshots | ✅ `test_partner_key_never_reaches_database_or_snapshot` scans every file in the data dir |
 | 10 | Paid-mode guards: no key → 402; budget and attempt caps → 402; balance below estimate → fails before submitting; definite rejection releases the reservation | ✅ tests plus an app check in `comfy_local` mode (402, 0 takes) |
 | 11 | **Real** hosted H3 run with the observed charge recorded | ✅ **One paid run, 2026-10-20:** 5 s 768P H3, succeeded in 2 min 42 s. Observed charge **135.78 credits ($0.6435)**, equal to the estimate, and it posted after completion. Output verified (`docs/RUNS.md`). A second take wasn't run, as instructed |
+
+## 5b. M2 results (fake adapter + offline only)
+
+| Area | Files |
+|---|---|
+| Schema: `assets` (unique `@handle` per project), `asset_versions` (DB triggers refuse UPDATE and DELETE), `scenes`, shot `mode` / `aspect_ratio` / `refs` / `scene_id`. Additive, idempotent migration of M1 databases | `studio/db.py` |
+| Asset, version and scene operations; refs pinned to **versions** and checked against the shot's own project; `refs_resolved` with `latest_version` for "vN available" | `studio/ops.py` |
+| Reference capabilities: 1–9 images, ≥256 px, aspect 0.4–2.5, ratio from the node's list, explicit refusal of start frame + references | `studio/execution/base.py`, `workflows/h3_reference.manifest.json` |
+| Reference workflow converted from the official `api_minimax_h3_r2v` template with ComfyUI's `graphToPrompt()`; the adapter clones the `LoadImage` node per reference (`2`, `1002`…`1009` → `model.reference_images.image_N`) | `workflows/h3_reference.api.json`, `studio/execution/comfy_local.py` |
+| Prompt binding `Image N is @handle (kind: description)`. First-frame wording unchanged, so run 1 stays reproducible | `studio/compiler.py` |
+| Snapshot records each reference's label, asset id, handle, kind, pinned version, description and image sha | `studio/generation.py` |
+| UI: assets panel (create v1, add version, version strip), scenes with grouped shot list, mode switch, ordered reference picker with "vN available → use it", conflict banner, reference thumbnails on proposals and takes | `web/src/AssetsPanel.tsx`, `ShotEditor.tsx`, `App.tsx`, `ProposalCard.tsx`, `TakeCard.tsx` |
+| Tests | `tests/test_m2_assets_references.py` (16) |
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Asset versions are append-only; the DB refuses UPDATE and DELETE of a version | ✅ test |
+| 2 | Updating an asset never changes an earlier take; the shot keeps its pinned version until an explicit, revisioned bump | ✅ test, and in the browser (take 1 `@oli v1`, take 2 `@oli v2`, take 1 unchanged) |
+| 3 | Reference proposal compiles `Image N` bindings in order, shows the inputs and the cost (incl. +12.07 cr per image over 5) | ✅ test and browser |
+| 4 | Capability errors before any submission: 0 refs, >9 refs, start frame + refs (both modes), bad ratio, bad reference aspect | ✅ tests; UI shows the error, plus a pre-warning banner with one-click fixes |
+| 5 | Scenes group shots; cross-project scene or reference refused | ✅ test and browser |
+| 6 | Adapter-built graphs (first frame; 1/3/9 refs) pass ComfyUI's own validation | ✅ `comfy_check.py graphs`, offline. ComfyUI does **not** reject an out-of-range slot such as `image_10`, so the app's ≤ 9 check is the real guard |
+| 7 | M1 databases migrate additively; the real paid take is untouched | ✅ test; a copy of the real DB, then the live DB: snapshot sha `d62f9bb4…` and video sha `e5a09cfd…` unchanged |
+| 8 | Full offline suite | ✅ **43 passed** |
+| 9 | Paid execution stays locked | ✅ a paid approval on the real DB returns 402 (`1/1`) before any submission |
+
+**Not yet verified against the real model (needs a paid run):**
+- That `MinimaxHailuo03ReferenceNode` accepts our cloned-node graph end to end: upload, task creation, output.
+- That H3 actually keeps identity, wardrobe and location from the references, and honours the "Image N" bindings and their order.
+- Reference-mode output aspect and quality at 768P, and the real charge (the estimate assumes no reference video and ≤ 5 images).
+- A real two-take revision: only one real take exists (first frame).
+- Prompt-descriptor adherence beyond run 1, where the push-in was subtle and low-key lighting wasn't applied.
 
 ## 6. Main risks
 

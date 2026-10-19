@@ -45,6 +45,7 @@ from .ops import ConflictError, NotFoundError, Ops
 log = logging.getLogger("studio.generation")
 
 DEFAULT_WORKFLOW = "h3_first_frame"
+WORKFLOW_FOR_MODE = {"first_frame": "h3_first_frame", "reference": "h3_reference"}
 RESUMABLE = ("queued", "submitted", "running", "generated", "import_failed")
 NEEDS_HUMAN = ("submission_unknown", "lost")
 TERMINAL = ("succeeded", "failed", "canceled")
@@ -115,8 +116,12 @@ class GenerationService:
                               f"{self.settings.budget_credits} are already committed")
 
     # -- proposals ------------------------------------------------------------------------------
-    def build_request(self, shot: dict, project: dict, workflow_id: str = DEFAULT_WORKFLOW,
+    def build_request(self, shot: dict, project: dict, workflow_id: str | None = None,
                       seed: int | None = None) -> RenderRequest:
+        """Passes every input the shot holds; the workflow's capabilities decide what is allowed, so
+        an unsupported combination is refused with a reason instead of silently dropped."""
+        mode = shot.get("mode") or "first_frame"
+        workflow_id = workflow_id or WORKFLOW_FOR_MODE[mode]
         start = None
         if shot.get("start_frame_sha"):
             rec = self.media.get(shot["start_frame_sha"])
@@ -124,13 +129,22 @@ class GenerationService:
                 raise ValueError("the shot's start frame is missing from the media store")
             start = ImageInput(sha256=rec.sha256, path=self.media.path(rec), mime=rec.mime,
                                width=rec.width or 0, height=rec.height or 0)
+        refs_resolved = self.ops.resolve_refs(shot.get("refs") or "[]")
+        refs = []
+        for r in refs_resolved:
+            rec = self.media.get(r["media_sha"])
+            refs.append(ImageInput(sha256=rec.sha256, path=self.media.path(rec), mime=rec.mime,
+                                   width=rec.width or 0, height=rec.height or 0))
         manifest = self.adapter.manifest(workflow_id)
-        return RenderRequest(workflow_id=workflow_id, mode=manifest.mode, prompt=compile_prompt(project, shot),
+        return RenderRequest(workflow_id=workflow_id, mode=manifest.mode,
+                             prompt=compile_prompt(project, shot, refs_resolved),
                              duration_s=int(shot["duration_s"]), resolution=shot["resolution"],
-                             seed=choose_seed(shot) if seed is None else seed, start_frame=start)
+                             seed=choose_seed(shot) if seed is None else seed, start_frame=start,
+                             references=tuple(refs),
+                             aspect_ratio=shot.get("aspect_ratio") if manifest.mode == "reference" else None)
 
     def create_proposal(self, sid: str, *, created_by: str = "user", note: str = "",
-                        parent_take_id: str | None = None, workflow_id: str = DEFAULT_WORKFLOW) -> dict:
+                        parent_take_id: str | None = None, workflow_id: str | None = None) -> dict:
         """No cost and no side effect outside our DB. Safe for the agent to call."""
         shot = self.ops.get_shot_row(sid)
         project = self.ops.get_project(shot["project_id"])
@@ -139,9 +153,10 @@ class GenerationService:
             if parent["shot_id"] != sid:
                 raise ValueError("parent take belongs to another shot")
         req = self.build_request(shot, project, workflow_id)
+        workflow_id = req.workflow_id
         manifest = self.adapter.manifest(workflow_id)
-        manifest.capabilities.validate(req)            # UnsupportedRequest -> 400, before any cost
-        est = manifest.credits_estimate(req.duration_s, req.resolution)
+        manifest.capabilities.validate(req)            # UnsupportedRequest -> 422, before any cost
+        est = manifest.credits_estimate(req.duration_s, req.resolution, len(req.references))
         pid = new_id("prp")
         with self.db.tx(immediate=True) as c:
             c.execute("UPDATE proposals SET status='superseded' WHERE shot_id=? AND status='pending'", (sid,))
@@ -227,19 +242,29 @@ class GenerationService:
         req_json = req.to_json()
         if req_json.get("start_frame"):
             req_json["start_frame"]["path"] = f"media/{Path(req_json['start_frame']['path']).name}"
+        for r in req_json.get("references", []):
+            r["path"] = f"media/{Path(r['path']).name}"
+        # Pinned asset versions as they were at approval: id, version, handle, description, image sha.
+        refs_snapshot = [
+            {"role": "reference", "label": r["label"], "asset_id": r["asset_id"], "handle": r["handle"],
+             "kind": r["kind"], "name": r["name"], "asset_version_id": r["asset_version_id"],
+             "version": r["version"], "description": r["description"], "sha256": r["media_sha"],
+             "mime": r["mime"], "width": r["width"], "height": r["height"]}
+            for r in self.ops.resolve_refs(shot.get("refs") or "[]")] if req.references else []
         return {
             "schema": 1,
             "take": {"number": number, "parent_take_id": p["parent_take_id"]},
             "project": {"id": project["id"], "name": project["name"], "direction": json.loads(project["direction"])},
-            "shot": {k: shot[k] for k in ("id", "revision", "title", "scene", "intention", "action", "framing",
-                                          "camera_move", "lens_look", "lighting", "duration_s", "resolution",
-                                          "seed", "start_frame_sha")},
+            "shot": {k: shot.get(k) for k in ("id", "revision", "title", "scene", "scene_id", "mode", "intention",
+                                              "action", "framing", "camera_move", "lens_look", "lighting",
+                                              "duration_s", "resolution", "aspect_ratio", "seed",
+                                              "start_frame_sha", "refs")},
             "proposal": {"id": p["id"], "created_by": p["created_by"], "created_at": p["created_at"],
                          "note": p["note"], "approved_by": by, "approved_at": ts},
             "request": req_json,
-            "inputs": [{"role": "start_frame", **{k: req_json["start_frame"][k] for k in
-                                                  ("sha256", "mime", "width", "height")}}]
-            if req_json.get("start_frame") else [],
+            "inputs": ([{"role": "start_frame", **{k: req_json["start_frame"][k] for k in
+                                                   ("sha256", "mime", "width", "height")}}]
+                       if req_json.get("start_frame") else []) + refs_snapshot,
             "workflow": {"id": manifest.id, "version": manifest.version, "file": manifest.workflow_path.name,
                          "file_sha256": _sha_file(manifest.workflow_path),
                          "manifest_sha256": _sha_file(self.settings.workflows_dir / f"{manifest.id}.manifest.json"),

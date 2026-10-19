@@ -1,0 +1,56 @@
+{
+  "id": "h3_reference",
+  "version": 1,
+  "title": "MiniMax H3 — reference images to video",
+  "mode": "reference",
+  "workflow_file": "h3_reference.api.json",
+  "source": {
+    "template": "api_minimax_h3_r2v",
+    "package": "comfyui-workflow-templates 0.11.89",
+    "license": "MIT (Comfy-Org/workflow_templates)",
+    "converted_with": "ComfyUI 0.42.1 frontend app.graphToPrompt(); storyboard image and prompt replaced by placeholders"
+  },
+  "comfyui_min_version": "0.42.1",
+  "partner_node": true,
+  "bindings": {
+    "reference_image": {"node": "2", "field": "image", "kind": "asset", "repeat": true,
+                        "slot_node": "4", "slot_field": "model.reference_images.image_{n}", "extra_node_base": 1000},
+    "prompt": {"node": "4", "field": "model.prompt"},
+    "resolution": {"node": "4", "field": "model.resolution"},
+    "aspect_ratio": {"node": "4", "field": "model.ratio"},
+    "duration": {"node": "4", "field": "model.duration"},
+    "seed": {"node": "4", "field": "seed"},
+    "model": {"node": "4", "field": "model"},
+    "watermark": {"node": "4", "field": "watermark"},
+    "output": {"node": "3"}
+  },
+  "fixed": {"model": "MiniMax H3", "watermark": false},
+  "capabilities": {
+    "start_frame": "not_supported",
+    "end_frame": "not_supported",
+    "reference_images": 9,
+    "reference_images_min": 1,
+    "reference_label": "Image {n}",
+    "reference_videos": "not_enabled",
+    "reference_audios": "not_enabled",
+    "image_min_side_px": 256,
+    "image_aspect_min": 0.4,
+    "image_aspect_max": 2.5,
+    "max_image_bytes": 20000000,
+    "image_mime_types": ["image/png", "image/jpeg", "image/webp"],
+    "aspect_ratios": ["adaptive", "16:9", "4:3", "1:1", "3:4", "9:16", "21:9"],
+    "durations_s": {"min": 4, "max": 15},
+    "resolutions": ["768P", "2K"],
+    "seed": {"min": 0, "max": 4294967295, "deterministic": false},
+    "audio": "always_generated",
+    "max_prompt_chars": 4000,
+    "prompt_controls_are_calibrated": false
+  },
+  "pricing": {
+    "basis": "MinimaxHailuo03ReferenceNode price badge, ComfyUI 0.42.1: duration*rate + max(0, images-5)*0.0572 USD (base H3, no reference video)",
+    "usd_per_second": {"768P": 0.1287, "2K": 0.1859},
+    "usd_per_image_over": {"threshold": 5, "usd": 0.0572},
+    "credits_per_usd": 211,
+    "verified_by_real_charge": false
+  }
+}

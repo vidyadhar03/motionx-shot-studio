@@ -44,7 +44,9 @@ export default function TakeCard({ take: t, shot, reasons, comparing, onCompare,
 
       <dl className="facts">
         <dt>Prompt</dt><dd className="clip">{t.snapshot.request?.prompt}</dd>
-        <dt>Shot</dt><dd>rev {t.snapshot.shot?.revision} · seed {t.snapshot.request?.seed}</dd>
+        <dt>Shot</dt><dd>rev {t.snapshot.shot?.revision} · seed {t.snapshot.request?.seed} · {t.snapshot.workflow?.id}</dd>
+        {(t.snapshot.inputs ?? []).some((i: any) => i.role === "reference") && <><dt>Refs</dt><dd>
+          {(t.snapshot.inputs as any[]).filter((i) => i.role === "reference").map((i) => `${i.label}: @${i.handle} v${i.version}`).join(" · ")}</dd></>}
         {meta && <><dt>Output</dt><dd>{meta.width}×{meta.height} · {meta.duration_s?.toFixed(1)}s{meta.has_audio ? " · audio" : ""}</dd></>}
         <dt>Cost</dt><dd>{t.is_paid ? <>est {t.est_credits.toFixed(1)} cr{t.observed_credits !== null ? <> · observed {t.observed_credits.toFixed(1)} cr</> : null}</> : "0 (fake)"}</dd>
         {total !== null && <><dt>Time</dt><dd>{total}s total{t.submitted_at ? ` · ${secs(t.submitted_at, t.finished_at)}s after submit` : ""}</dd></>}
