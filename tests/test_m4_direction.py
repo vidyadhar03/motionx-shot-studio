@@ -26,17 +26,31 @@ def test_wide_to_close_up_push_is_valid_and_explicit(world: World):
 @pytest.mark.parametrize("fields,needle", [
     ({"framing": "close_up", "end_framing": "wide", "camera_move": "push_in"}, "push_in ends tighter"),
     ({"framing": "wide", "end_framing": "close_up", "camera_move": "pull_out"}, "pull_out ends wider"),
-    ({"framing": "wide", "end_framing": "close_up", "camera_move": "static"}, "does not change the shot size"),
-    ({"framing": "wide", "end_framing": "close_up", "camera_move": "pan_left"}, "does not change the shot size"),
-    ({"framing": "wide", "end_framing": "wide", "camera_move": "push_in"}, "equals framing"),
+    ({"framing": "wide", "end_framing": "close_up", "camera_move": "static"}, "without camera movement"),
     ({"framing": None, "end_framing": "close_up", "camera_move": "push_in"}, "set the starting framing"),
-    ({"camera_detail": LIVE_RUN_DETAIL}, "repeats the 'push_in' preset"),
-    ({"camera_detail": "slow, ending tightly on her eyes"}, "set end_framing"),
+    ({"camera_move": None, "end_framing": None, "camera_detail": "very slow"}, "choose camera_move first"),
+    ({"action": "0-3s: she waits; 3-7s: she turns"}, "refers to 7s"),
 ])
-def test_incoherent_direction_is_refused_with_guidance(world: World, fields, needle):
+def test_impossible_direction_is_refused_with_guidance(world: World, fields, needle):
     shot = world.shot()                                                 # wide, push_in, 5 s
     with pytest.raises(ValueError, match=needle):
         world.ops.update_shot(shot["id"], fields, expected_revision=1)
+
+
+@pytest.mark.parametrize("fields,code", [
+    ({"camera_detail": LIVE_RUN_DETAIL}, ["detail_restates_move", "detail_implies_end"]),
+    ({"camera_detail": "slow, ending tightly on her eyes"}, "detail_implies_end"),
+    ({"camera_detail": "very slow, drifting slightly left as she turns"}, None),
+    ({"camera_detail": "slow, with a slight pan to follow her glance"}, "detail_mentions_other_move"),
+    ({"framing": "wide", "end_framing": "wide"}, "end_same_as_start"),
+    ({"framing": "wide", "end_framing": "close_up", "camera_move": "pan_left"}, "end_needs_size_change"),
+])
+def test_redundant_or_ambiguous_direction_is_accepted_with_a_warning(world: World, fields, code):
+    shot = world.shot()
+    s = world.ops.update_shot(shot["id"], fields, expected_revision=1)
+    assert s["revision"] == 2
+    codes = [w["code"] for w in s["direction_warnings"]]
+    assert codes == (code if isinstance(code, list) else [code] if code else [])
 
 
 def test_end_point_language_is_fine_once_end_framing_is_explicit(world: World):
@@ -46,12 +60,22 @@ def test_end_point_language_is_fine_once_end_framing_is_explicit(world: World):
     assert s["revision"] == 2
 
 
-def test_live_run_detail_now_returns_a_corrective_error_to_the_agent(world: World):
+def test_live_run_detail_is_accepted_and_the_agent_sees_the_warning(world: World):
     shot = world.shot()
     out = AgentTools(shot["project_id"], world.ops, world.service, world.media).execute(
         ToolCall("w", "write", {"path": f"/shots/{shot['id']}", "patch": {"camera_detail": LIVE_RUN_DETAIL},
                                 "expected_revision": 1}))
-    assert out.is_error and "repeats" in out.content["message"]
+    assert not out.is_error and out.content["revision"] == 2
+    assert any("repeats" in w for w in out.content["warnings"])
+    assert any("end_framing" in w for w in out.content["warnings"])
+
+
+def test_impossible_direction_is_still_an_error_for_the_agent(world: World):
+    shot = world.shot()
+    out = AgentTools(shot["project_id"], world.ops, world.service, world.media).execute(
+        ToolCall("w", "write", {"path": f"/shots/{shot['id']}", "patch": {"end_framing": "extreme_wide"},
+                                "expected_revision": 1}))
+    assert out.is_error and "push_in ends tighter" in out.content["message"]
 
 
 def test_duration_change_reports_cost_impact_to_the_agent(world: World):

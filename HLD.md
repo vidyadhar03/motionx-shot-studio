@@ -177,11 +177,13 @@ The thread is bound to one project. Every path is relative to it, so another pro
 
 ### 6.3 Revision instructions → compiled prompt (no contradictions)
 
+Since M5 the checks have two levels. **Errors** are input the prompt can't honour as written (it would be dropped or state something impossible) and refuse the write. **Warnings** are legitimate but redundant or ambiguous; the write is accepted, the shot carries `direction_warnings`, the editor shows them, and the agent's `write` result lists them.
+
 | Instruction kind | Lands in | Rule enforced in code |
 |---|---|---|
 | Which move ("push in", "track") | `camera_move` preset | One preset per shot |
-| Where the move ends ("end on her eyes") | **`end_framing`** (M4), rendered as "The move carries the frame to a close-up on the face by the end of the shot." | Needs a starting `framing` and a size-changing move. `push_in` must end tighter and `pull_out` wider; static, pans and tilts are refused; an end equal to the start is refused |
-| How the move behaves ("slower", "starts after 2 s") | `camera_detail` (≤ 200 chars), rendered right after the preset phrase | Refused if it names a *different* move, **restates its own preset** (M4), or implies a tighter ending ("eyes", "close-up") on a wide/medium shot without `end_framing` (M4). Refused if `camera_move` is empty |
+| Where the move ends ("end on her eyes") | **`end_framing`** (M4), rendered as "The move carries the frame to a close-up on the face by the end of the shot." | **Refused:** no starting `framing`; `push_in` ending wider; `pull_out` ending tighter; an end with a static camera. **Warned (M5):** end equal to start; a pan/tilt changing size |
+| How the move behaves ("slower", "starts after 2 s") | `camera_detail` (≤ 200 chars), rendered right after the preset phrase | **Refused:** `camera_move` empty (the detail would be dropped). **Warned (M5, refused in M4):** names a different move (a combined move may be deliberate; zoom/crane have no preset), restates its own preset, implies a tighter ending ("eyes", "close-up") on a wide/medium shot without `end_framing` |
 | Timing ("hold 2 s, then she turns") | `duration_s` (4–15) plus timed beats in `action` ("0–2s: …; 2–5s: …") | Any time mentioned in `action` or `camera_detail` must be ≤ `duration_s` |
 | "Too fast" | One coherent remedy: slower `camera_detail` pace, a shorter distance (`end_framing`), or a longer `duration_s` | The write result reports the estimate before and after any duration change, so the agent can state the cost (M4) |
 | Vague or unsupported notes | No edit. The agent explains the limit or asks which aspect to change | Skill rule; the scripted provider does this; untested live |
@@ -407,8 +409,8 @@ Copying about 600 lines of patterns is cheaper and safer than untangling any of 
 
 | # | Decision | Default if no answer | Needed by |
 |---|---|---|---|
-| D1 | Further paid generation (e.g. the first real reference-to-video take, a real two-take revision) | none authorised; the app refuses paid approvals (1/1 used) | before M5 demo |
-| D2 | First live agent run: Gemini key (`GEMINI_API_KEY`), model, and an LLM spend cap (`STUDIO_AGENT_BUDGET_USD`, default 0 = blocked) | none authorised; scripted provider only | before the M5 demo |
+| D1 | Further paid generation (e.g. the first real reference-to-video take, a real two-take revision) | none authorised; the app refuses paid approvals (1/1 used). Staged plan with caps (Stages B, D): `docs/M5_APPROVAL_BRIEF.md` | before M5 demo |
+| D2 | First live agent run: Gemini key (`GEMINI_API_KEY`), model, and an LLM spend cap (`STUDIO_AGENT_BUDGET_USD`, default 0 = blocked) | run 1 done (2026-10-20); further runs not authorised. Staged plan (Stages A, C): `docs/M5_APPROVAL_BRIEF.md` | before the M5 demo |
 | D3 | Public repo owner/name and licence | `motionx-shot-studio`, MIT (matches comfy-sdk and the templates) | before publishing, Oct 28 |
-| D4 | Demo material: which characters, locations and frames we have rights to show (no real likenesses without consent, no private MotionX footage) | CC0/stock or our own generated stills | Oct 24 |
+| D4 | Demo material: which characters, locations and frames we have rights to show (no real likenesses without consent, no private MotionX footage) | repo-made synthetic `samples/` (used in "Last Tram"); better images listed with prompts in the M5 brief, not generated | Oct 24 |
 | D5 | Also enter **Open Weights Only** via the native H3 I2V template on Cloud? (licence for open-weights H3 on Cloud is UNVERIFIED) | no. Main category plus the MiniMax H3 bonus | Oct 26 |

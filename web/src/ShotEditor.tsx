@@ -196,7 +196,7 @@ export default function ShotEditor({ shot, presets, assets, scenes, revision, on
           <div className="row">
             <label>Duration
               <select value={draft.duration_s as number} onChange={(e) => set("duration_s", Number(e.target.value))}>
-                {[4, 5, 6, 8, 10].map((d) => <option key={d} value={d}>{d}s</option>)}
+                {Array.from({ length: 12 }, (_, i) => i + 4).map((d) => <option key={d} value={d}>{d}s</option>)}
               </select></label>
             <label>Resolution
               <select value={draft.resolution as string} onChange={(e) => set("resolution", e.target.value)}>
@@ -211,6 +211,12 @@ export default function ShotEditor({ shot, presets, assets, scenes, revision, on
             <label>Seed <input placeholder="random" value={(draft.seed as number | null) ?? ""} inputMode="numeric"
                                onChange={(e) => set("seed", e.target.value === "" ? null : Number(e.target.value))} /></label>
           </div>
+          {shot.direction_warnings?.length > 0 && (
+            <div className="banner warn direction-warnings">
+              <strong>Direction notes{dirty ? " (saved version)" : ""}:</strong> accepted, but worth a second look.
+              <ul>{shot.direction_warnings.map((w) => <li key={w.code}>{w.message}</li>)}</ul>
+            </div>
+          )}
           <p className="hint">Framing, camera, lens and lighting become prompt descriptors. They are not calibrated camera or lighting controls.
             Timed beats go in Action (“0–2s: …”) and must fit the duration.</p>
           <div className="actions">

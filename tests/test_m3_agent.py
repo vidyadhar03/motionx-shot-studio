@@ -63,7 +63,15 @@ def test_camera_detail_and_audio_compile_without_contradiction(world: World):
 
 @pytest.mark.parametrize("fields,needle", [
     ({"camera_move": "push_in", "camera_detail": "then pan left to the door"}, "mentions a pan move"),
-    ({"camera_move": "static", "camera_detail": "slow zoom"}, "mentions a zoom move"),
+    ({"camera_move": "static", "camera_detail": "slow zoom"}, "zoom has no preset"),
+])
+def test_combined_or_unsupported_moves_in_detail_are_warned_not_refused(world: World, fields, needle):
+    shot = world.shot()                                                 # M5: these were refusals in M3/M4
+    s = world.ops.update_shot(shot["id"], fields, expected_revision=1)
+    assert any(needle in w["message"] for w in s["direction_warnings"])
+
+
+@pytest.mark.parametrize("fields,needle", [
     ({"camera_move": None, "camera_detail": "slowly"}, "choose camera_move first"),
     ({"action": "0-3s: waits; 3-9s: she turns", "duration_s": 5}, "refers to 9s"),
     ({"audio": "thunder at 12 seconds", "duration_s": 6}, "refers to 12s"),

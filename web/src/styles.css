@@ -44,7 +44,9 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; 
 
 .layout { display: grid; grid-template-columns: 290px 1fr; min-height: calc(100vh - 54px); }
 .sidebar { border-right: 1px solid var(--line); padding: 14px; background: var(--panel); }
-.main { padding: 18px 22px 60px; max-width: 1280px; }
+.main { padding: 18px 22px 60px; max-width: 1680px; display: grid; grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 18px; align-items: start; }
+.main-content { grid-column: 1; grid-row: 1; min-width: 0; }
 .section-title { display: flex; align-items: center; gap: 10px; font-weight: 600; margin: 4px 0 10px; }
 .section-title button { margin-left: auto; }
 .section-title .muted button { margin-left: 8px; }
@@ -175,7 +177,7 @@ label.inline select { width: auto; }
 .ref-thumbs figcaption { font-size: 10px; color: var(--muted); text-align: center; }
 
 /* M3: agent */
-.agent-panel { float: right; width: 360px; margin: 0 0 18px 18px; background: var(--panel); border: 1px solid var(--line);
+.agent-panel { grid-column: 2; grid-row: 1; background: var(--panel); border: 1px solid var(--line);
   border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 8px; position: sticky; top: 70px;
   max-height: calc(100vh - 90px); }
 .agent-log { overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 6px; min-height: 160px; }
@@ -200,7 +202,11 @@ label.inline select { width: auto; }
 .history ul { margin: 6px 0; padding-left: 16px; }
 .decisions { margin-top: 10px; font-size: 12px; }
 .decision { margin: 3px 0; }
-@media (max-width: 1250px) { .agent-panel { float: none; width: auto; margin: 0 0 18px; position: static; max-height: none; } }
+@media (max-width: 1250px) {
+  .main { grid-template-columns: minmax(0, 1fr); }
+  .agent-panel { grid-column: 1; grid-row: 1; position: static; max-height: none; }
+  .main-content { grid-row: 2; }
+}
 
 /* M4: export, cancel, accounting */
 .export { margin-top: 10px; }
@@ -210,3 +216,4 @@ label.inline select { width: auto; }
 .button-link { display: inline-block; margin-top: 8px; background: var(--accent); color: var(--accent-ink); padding: 6px 10px;
   border-radius: 6px; font-weight: 600; text-decoration: none; }
 .accounting summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+.direction-warnings ul { margin: 6px 0 0; padding-left: 18px; }

@@ -133,9 +133,12 @@ class FakeAdapter:
             seed = int(request.get("seed", 0))
             zoom = "min(zoom+0.0025,1.35)" if seed % 2 == 0 else "if(eq(on,1),1.35,max(zoom-0.0025,1))"
             with tempfile.TemporaryDirectory() as d:
-                out = Path(d) / "fake.mp4"
-                cmd = ["ffmpeg", "-loglevel", "error", "-y", "-loop", "1", "-i", frame, "-vf",
-                       f"scale=1344:-2,zoompan=z='{zoom}':d=72:s=672x384:fps=24,format=yuv420p",
+                out, label = Path(d) / "fake.mp4", Path(d) / "label.png"
+                _label_png(label, f"FAKE OUTPUT - placeholder, not a model result - seed {seed}")
+                cmd = ["ffmpeg", "-loglevel", "error", "-y", "-loop", "1", "-i", frame, "-i", str(label),
+                       "-filter_complex",
+                       f"[0]scale=1344:-2,zoompan=z='{zoom}':d=72:s=672x384:fps=24[v];"
+                       "[v][1]overlay=0:0,format=yuv420p",
                        "-t", "3", "-c:v", "libx264", "-preset", "veryfast", "-crf", "30", str(out)]
                 if subprocess.run(cmd, capture_output=True, timeout=60).returncode == 0:
                     # Append the seed so different takes never collapse onto one content hash.
@@ -159,3 +162,16 @@ class FakeAdapter:
         jobs = self._load()["jobs"]
         return [{"id": k, "created_at": v["created"], "status": self.get(k).status}
                 for k, v in sorted(jobs.items(), key=lambda kv: -kv[1]["created"])[:20]]
+
+
+def _label_png(path: Path, text: str) -> None:
+    """A banner burned into every ffmpeg-rendered fake clip, so a placeholder can't pass for a real take
+    in a screen recording or an export. (ffmpeg's drawtext isn't in every build; Pillow is a dependency.)"""
+    from PIL import Image, ImageDraw, ImageFont
+    img = Image.new("RGBA", (672, 34), (180, 20, 20, 215))
+    try:
+        font = ImageFont.load_default(size=17)
+    except TypeError:                                   # Pillow < 10.1
+        font = ImageFont.load_default()
+    ImageDraw.Draw(img).text((10, 7), text, fill=(255, 255, 255, 255), font=font)
+    img.save(path)

@@ -139,6 +139,7 @@ export default function App() {
                         onStateChanged={() => { if (shot) refreshShot(shot.id); refreshProject(project.id); }}
                         onOpenShot={(id) => openShot(id)} onError={fail} />
           )}
+          <div className="main-content">
           {!shot && project && <div className="empty big">Select a shot or add one.<br /><button onClick={() => newShot()}>+ Shot</button></div>}
           {shot && presets && status && (
             <>
@@ -177,6 +178,7 @@ export default function App() {
               </section>
             </>
           )}
+          </div>
         </main>
       </div>
     </div>

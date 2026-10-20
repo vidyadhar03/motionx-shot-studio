@@ -13,6 +13,7 @@ from typing import Any
 from .base import ToolCall, ToolOutcome, ToolSpec, Turn, Usage
 
 SHOT_RX = re.compile(r"sht_[0-9a-f]+")
+SCENE_RX = re.compile(r"scn_[0-9a-f]+")
 
 
 class ScriptedProvider:
@@ -43,11 +44,15 @@ class ScriptedProvider:
         since = history[users[-1]:] if users else history
         phase = sum(1 for it in since if it.get("role") == "assistant")
         results = {r["call_id"]: r for it in since if it.get("role") == "tool" for r in it["results"]}
-        m = SHOT_RX.search(since[0].get("text", "")) if since else None
-        if not m:
-            return self._say("Scripted agent: name a shot id (sht_...) and I will apply its latest feedback.")
-        sid = m.group(0)
+        text = since[0].get("text", "") if since else ""
+        m = SHOT_RX.search(text)
         res = lambda p, i: results.get(f"u{u}-p{p}-{i}", {}).get("content", {})  # noqa: E731
+        if not m and SCENE_RX.search(text):
+            return self._first_shot(u, phase, text, SCENE_RX.search(text).group(0), res)
+        if not m:
+            return self._say("Scripted agent: name a shot id (sht_...) and I will apply its latest feedback, or a "
+                             "scene id (scn_...) with an Intention: line and I will draft its first shot.")
+        sid = m.group(0)
 
         if phase == 0:
             return self._calls(u, 0, [("list", {"path": "/"}), ("read", {"path": "/skills/shot-direction"}),
@@ -103,6 +108,47 @@ class ScriptedProvider:
                          f"shot is now revision {write.get('revision')}) and created pending proposal "
                          f"{prop.get('proposal_id')} (~{prop.get('est_credits')} credits on the real route).{cost_text} "
                          + (" ".join(said) + " " if said else "") + "It needs your approval; I cannot approve or submit.")
+
+    # -- first shot of a scene: references -> draft shot -> pending proposal ----------------------
+    def _first_shot(self, u: int, phase: int, text: str, scene_id: str, res) -> Turn:
+        if phase == 0:
+            return self._calls(u, 0, [("read", {"path": "/"}), ("read", {"path": "/skills/shot-direction"}),
+                                      ("read", {"path": "/decisions"}), ("list", {"path": "/assets"}),
+                                      ("read", {"path": f"/scenes/{scene_id}"})],
+                               "Reading the brief, skill, decisions, assets and scene.")
+        root, decisions, assets, scene = res(0, 0), res(0, 2), res(0, 3).get("assets", []), res(0, 4)
+        if "error" in scene:
+            return self._say(f"Scripted agent stopped: {scene['message']}")
+        order = {"character": 0, "location": 1, "prop": 2}
+        assets = sorted(assets, key=lambda a: order.get(a["kind"], 3))[:9]
+        if phase == 1:
+            if not assets:
+                return self._say("Scripted agent: the project has no assets, so there is nothing to reference yet.")
+            return self._calls(u, 1, [("read", {"path": f"/assets/{a['handle']}/v{a['current_version']}"})
+                                      for a in assets], "Looking at the current version of each asset.")
+        versions = [res(1, i) for i in range(len(assets))]
+        intention = _line(text, "intention")
+        if not intention:
+            return self._say("Scripted agent: add an 'Intention:' line saying what the shot is for; I don't invent one.")
+        if phase == 2:
+            return self._calls(u, 2, [("write", {"path": "/shots", "patch": first_shot_patch(
+                root, decisions, versions, scene_id, intention, _line(text, "action"))})],
+                "Drafting the shot from the scene intention and the referenced assets.")
+        made = res(2, 0)
+        if "error" in made:
+            return self._say(f"Scripted agent: the shot write was refused ({made['message']}); no proposal made.")
+        sid = made["created"].rsplit("/", 1)[-1]
+        if phase == 3:
+            return self._calls(u, 3, [("propose_generation", {"shot_id": sid, "note": "First proposal: " + intention[:200]})],
+                               "Creating a pending proposal.")
+        prop = res(3, 0)
+        if "error" in prop:
+            return self._say(f"Scripted agent: the proposal was refused ({prop['message']}).")
+        refs = ", ".join(f"Image {i + 1} = @{v['handle']} v{v['version']}" for i, v in enumerate(versions))
+        warn = (" The app flagged: " + " ".join(made["warnings"])) if made.get("warnings") else ""
+        return self._say(f"Scripted agent (rule-based, not an AI): drafted shot {sid} from the scene intention with "
+                         f"{refs}, and created pending proposal {prop.get('proposal_id')} (~{prop.get('est_credits')} "
+                         f"credits on the real route).{warn} It needs your approval; I cannot approve or submit.")
 
     # -- helpers --------------------------------------------------------------------------------
     def _calls(self, u: int, phase: int, calls: list[tuple[str, dict]], text: str) -> Turn:
@@ -172,3 +218,31 @@ def derive_patch(shot: dict, notes: list[str], refs: list[dict], asset_reads: li
             said.append(f'"{note}": not specific enough for me to change a field. Should it change framing, '
                         "movement, timing, lighting or sound?")
     return patch, said
+
+
+def _line(text: str, label: str) -> str:
+    m = re.search(rf"{label}\s*:\s*(.+?)(?:\n|$|(?=\b(?:Intention|Action)\s*:))", text, re.IGNORECASE)
+    return m.group(1).strip() if m else ""
+
+
+def first_shot_patch(root: dict, decisions: dict, versions: list[dict], scene_id: str, intention: str,
+                     action: str) -> dict:
+    """Fixed opening-shot rules (stand-in for an LLM): establish the space with a slow push from wide to
+    medium, light from the project direction, steer sound from the brief and recorded decisions."""
+    direction = " ".join(str(v) for v in (root.get("direction") or {}).values()).lower()
+    brief = (root.get("brief") or "").lower() + " " + intention.lower()
+    said = " ".join(d.get("text", "") for d in decisions.get("decisions", [])).lower()
+    lighting = ("low_key_night" if "night" in direction + brief else
+                "golden_hour" if "golden" in direction + brief else "natural_day")
+    sound = ["steady rain on the street"] if "rain" in brief else []
+    if re.search(r"no (score|music)", said):
+        sound.append("no music")
+    patch = {"title": "Opening shot", "scene_id": scene_id, "intention": intention, "mode": "reference",
+             "aspect_ratio": "16:9", "framing": "wide", "end_framing": "medium", "camera_move": "push_in",
+             "camera_detail": "very slow, even pace", "lighting": lighting, "duration_s": 5,
+             "refs": [{"asset_version_id": v["asset_version_id"]} for v in versions]}
+    if action:
+        patch["action"] = action
+    if sound:
+        patch["audio"] = "; ".join(sound).capitalize()
+    return patch

@@ -31,10 +31,10 @@ calibrated controls. Describe the picture plainly and expect to iterate.
 | Size the shot **starts** at | `framing` | Always set it |
 | Size the move **reaches** | `end_framing` | Only for a move that changes size. `push_in` must end tighter, `pull_out` wider. `static`, pans and tilts keep their size. Leave it empty when the size doesn't change |
 | Which move | `camera_move` | One preset |
-| How the move **behaves** | `camera_detail` | Pace, timing and what it settles on. **Never restate the move** ("slow push in" when `camera_move=push_in` is refused) |
+| How the move **behaves** | `camera_detail` | Pace, timing and what it settles on. Don't restate the move ("slow push in" when `camera_move=push_in` says it twice; the app warns) |
 | How long it lasts | `duration_s` (4–15) | Changes cost. The write result reports the estimate before and after |
 
-A wide shot that pushes into a close-up is valid and common. Express it as `framing=wide`, `end_framing=close_up`, `camera_move=push_in`. If `camera_detail` says "ending on her eyes" while `end_framing` is empty, the app refuses it, because the start and end sizes would be implicit and contradictory.
+A wide shot that pushes into a close-up is valid and common. Express it as `framing=wide`, `end_framing=close_up`, `camera_move=push_in`. If `camera_detail` says "ending on her eyes" while `end_framing` is empty, the app accepts it with a warning: set `end_framing` so the start and end sizes are explicit. A push_in that ends wider, a pull_out that ends tighter, or an `end_framing` on a static shot is impossible and refused.
 
 ### "Too fast" has three remedies; pick one coherent combination
 
@@ -44,13 +44,13 @@ A wide shot that pushes into a close-up is valid and common. Express it as `fram
 
 Don't lengthen past 15 s. If the note needs more, suggest splitting into shots instead of editing.
 
-## Where each kind of note goes (the app enforces this)
+## Where each kind of note goes (the app refuses impossible input and warns about the rest)
 
 | Note says | Change | Don't |
 |---|---|---|
 | a different move ("make it a track") | `camera_move` preset | describe the move in `action` |
 | where the move ends ("end on her eyes") | `end_framing` (+ a size-changing `camera_move`) | write it into `camera_detail` alone |
-| how the move behaves ("slower", "starts after 2 s") | `camera_detail` (≤ 200 chars) | name a move there; that's refused |
+| how the move behaves ("slower", "starts after 2 s") | `camera_detail` (≤ 200 chars) | name a different move there unless you mean a combined move (warned) |
 | timing ("hold 2 s, then she turns") | `duration_s` and timed beats in `action`: `0–2s: …; 2–5s: …` | mention a time beyond `duration_s`; that's refused |
 | sound ("rain, no music", "her breath only") | `audio` (≤ 300 chars) | promise exact sync; the audio is generated, so steer it |
 | lighting, lens look | the presets `lighting`, `lens_look` | restate them in free text |
@@ -94,9 +94,23 @@ Presets:
    the feedback is your evidence.
 4. Inspect the pinned assets you'll rely on (`read /assets/{handle}/v{n}`).
 5. Make the **smallest coherent** change that answers each clear note, in one `write` with `expected_revision`.
-   If the write is refused, read the message: it names the coherent alternative.
+   If the write is refused, read the message: it names the coherent alternative. If it succeeds with
+   `warnings`, fix each one unless it is deliberate, and tell the person about any you leave.
 6. `propose_generation` with `parent_take_id` set to the take you're revising and a note quoting
    the feedback.
 7. Tell the person what changed, any duration or cost change, anything you didn't change and why
    (or your question), and that the proposal waits for their approval. You can't approve, submit or
    select takes.
+
+## Drafting the first shot of a scene
+
+1. `read /`, `read /decisions`, `list /assets` and `read /scenes/{id}`.
+2. Look at the current version of each asset you will reference (`read /assets/{handle}/v{n}`). Use
+   only assets the person created; don't describe people, places or props that aren't in them.
+3. One `write` to `/shots` with `scene_id`, `mode: "reference"`, `refs` (characters first, then the
+   location; at most 5 keeps the base price), `intention` taken from the person's request,
+   a concrete `action`, and framing/move/lighting chosen for an opening (space before faces).
+   Don't invent story beats the request doesn't contain; ask instead.
+4. `propose_generation` with a note that says it is the first proposal.
+5. Tell the person which asset is Image 1…N, the start and end framing, the estimate, and that the
+   proposal waits for their approval.

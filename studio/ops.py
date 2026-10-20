@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .compiler import PRESETS, check_direction
+from .compiler import PRESETS, check_direction, direction_issues
 from .db import Database, dumps, new_id, now
 
 SHOT_FIELDS = ("scene", "order_idx", "title", "intention", "action", "framing", "camera_move", "lens_look",
@@ -243,8 +243,9 @@ class Ops:
         takes = [self.take_out(t) for t in
                  self.db.all("SELECT * FROM takes WHERE shot_id=? ORDER BY number DESC", sid)]
         revisions = self.db.all("SELECT revision, author, at FROM shot_revisions WHERE shot_id=? ORDER BY revision DESC", sid)
+        warnings = [i for i in direction_issues(shot) if i["level"] == "warning"]
         return {**shot, "refs": json.loads(shot["refs"] or "[]"), "refs_resolved": self.resolve_refs(shot["refs"]),
-                "proposals": proposals, "takes": takes, "revisions": revisions}
+                "proposals": proposals, "takes": takes, "revisions": revisions, "direction_warnings": warnings}
 
     def list_shots(self, pid: str) -> list[dict]:
         return self.db.all(

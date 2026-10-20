@@ -20,6 +20,7 @@ export type Shot = {
   camera_detail: string; audio: string; locked: number; end_framing: string | null;
   refs: { asset_version_id: string }[]; refs_resolved: RefResolved[];
   revisions: { revision: number; author: string; at: string }[];
+  direction_warnings: { level: string; code: string; message: string }[];
 };
 
 export type Proposal = {

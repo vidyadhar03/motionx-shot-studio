@@ -134,47 +134,77 @@ _TIGHT_WORDS = ("close-up", "close up", "closeup", "tight", "eyes", "face", "ecu
 SIZE_CHANGING_MOVES = ("push_in", "pull_out", "tracking", "handheld", "arc")
 
 
-def check_direction(shot: dict[str, Any]) -> None:
-    """Deterministic contradiction checks over the merged shot state. Raises ValueError with what to do."""
+def direction_issues(shot: dict[str, Any]) -> list[dict[str, str]]:
+    """Deterministic checks over the merged shot state.
+
+    "error": the input can't be honoured as written (the prompt would drop it or state something
+    impossible), so the write is refused. "warning": legitimate but worth a second look (redundant
+    or ambiguous wording); the write is accepted and the warning is shown next to the shot."""
+    out: list[dict[str, str]] = []
+    err = lambda code, msg: out.append({"level": "error", "code": code, "message": msg})      # noqa: E731
+    warn = lambda code, msg: out.append({"level": "warning", "code": code, "message": msg})  # noqa: E731
     detail = (shot.get("camera_detail") or "").strip()
     audio = (shot.get("audio") or "").strip()
     if len(detail) > MAX_CAMERA_DETAIL:
-        raise ValueError(f"camera_detail is {len(detail)} characters; keep it under {MAX_CAMERA_DETAIL}")
+        err("detail_too_long", f"camera_detail is {len(detail)} characters; keep it under {MAX_CAMERA_DETAIL}")
     if len(audio) > MAX_AUDIO:
-        raise ValueError(f"audio is {len(audio)} characters; keep it under {MAX_AUDIO}")
+        err("audio_too_long", f"audio is {len(audio)} characters; keep it under {MAX_AUDIO}")
     framing, end, move = shot.get("framing"), shot.get("end_framing"), shot.get("camera_move")
     if end:
         if not framing:
-            raise ValueError("end_framing describes where a move ends: set the starting framing first")
-        if end == framing:
-            raise ValueError("end_framing equals framing; leave end_framing empty for a shot that keeps its size")
-        if move not in SIZE_CHANGING_MOVES:
-            raise ValueError(f"camera_move {move!r} does not change the shot size; use push_in (to go tighter) or "
-                             f"pull_out (to go wider) for a {framing} -> {end} change")
-        tighter = FRAMING_ORDER[end] > FRAMING_ORDER[framing]
-        if move == "push_in" and not tighter:
-            raise ValueError(f"a push_in ends tighter than it starts, but {end} is wider than {framing}")
-        if move == "pull_out" and tighter:
-            raise ValueError(f"a pull_out ends wider than it starts, but {end} is tighter than {framing}")
+            err("end_without_start", "end_framing describes where a move ends: set the starting framing first")
+        elif end == framing:
+            warn("end_same_as_start", f"end_framing equals framing ({end}), so it adds nothing to the prompt; "
+                                      "clear it for a shot that keeps its size")
+        elif move == "static" or not move:
+            err("end_without_move", f"the frame can't go from {framing} to {end} without camera movement; choose "
+                                    "push_in (tighter) or pull_out (wider), or clear end_framing")
+        else:
+            tighter = FRAMING_ORDER[end] > FRAMING_ORDER[framing]
+            if move == "push_in" and not tighter:
+                err("push_ends_wider", f"a push_in ends tighter than it starts, but {end} is wider than {framing}; "
+                                       "use pull_out or swap the framings")
+            elif move == "pull_out" and tighter:
+                err("pull_ends_tighter", f"a pull_out ends wider than it starts, but {end} is tighter than "
+                                         f"{framing}; use push_in or swap the framings")
+            elif move not in SIZE_CHANGING_MOVES:
+                warn("end_needs_size_change", f"{move} usually keeps the shot size; a {framing} -> {end} change "
+                                              "is clearer as push_in or pull_out. The model may ignore one of them")
     if detail:
         if not move:
-            raise ValueError("camera_detail qualifies the camera move: choose camera_move first")
-        own = PRESET_FAMILY[move]
-        text = f" {detail.lower()} "
-        for family, words in MOVE_FAMILIES.items():
-            if family != own and any(w in text for w in words):
-                raise ValueError(f"camera_detail mentions a {family} move but camera_move is {move!r}; "
-                                 f"change camera_move instead of contradicting it in camera_detail")
-        if any(w in text for w in MOVE_NAMES[own]):
-            raise ValueError(f"camera_detail repeats the {move!r} preset; describe only how it behaves "
-                             f"(pace, timing, what it settles on)")
-        if not end and framing in ("extreme_wide", "wide", "medium") and any(w in text for w in _TIGHT_WORDS):
-            raise ValueError(f"camera_detail implies the shot ends closer than its {framing} framing; set "
-                             f"end_framing (e.g. close_up) so the start and end sizes are explicit")
+            err("detail_without_move", "camera_detail qualifies the camera move and is dropped from the prompt "
+                                       "without one: choose camera_move first")
+        else:
+            own = PRESET_FAMILY[move]
+            text = f" {detail.lower()} "
+            others = [f for f, words in MOVE_FAMILIES.items() if f != own and any(w in text for w in words)]
+            if others:
+                unsupported = [f for f in others if f in ("zoom", "crane")]
+                extra = (f" ({', '.join(unsupported)} has no preset, so whether the model follows it is untested)"
+                         if unsupported else "")
+                warn("detail_mentions_other_move", f"camera_detail mentions a {'/'.join(others)} move while "
+                     f"camera_move is {move!r}; fine for a deliberate combined move, otherwise change camera_move"
+                     f"{extra}")
+            if any(w in text for w in MOVE_NAMES[own]):
+                warn("detail_restates_move", f"camera_detail repeats the {move!r} preset, so the prompt says it "
+                                             "twice; describe only how it behaves (pace, timing, what it settles on)")
+            if not end and framing in ("extreme_wide", "wide", "medium") and any(w in text for w in _TIGHT_WORDS):
+                warn("detail_implies_end", f"camera_detail implies the shot ends closer than its {framing} "
+                                           "framing; set end_framing (e.g. close_up) to make the end size explicit")
     duration = int(shot.get("duration_s") or 5)
     for field in ("action", "camera_detail", "audio"):
         for m in _SECONDS.finditer(shot.get(field) or ""):
             t = max(float(x) for x in m.groups() if x)
             if t > duration:
-                raise ValueError(f"{field} refers to {t:g}s but the shot is {duration}s long; "
-                                 f"shorten the beat or raise duration_s")
+                err("beat_after_end", f"{field} refers to {t:g}s but the shot is {duration}s long; "
+                                      "shorten the beat or raise duration_s")
+    return out
+
+
+def check_direction(shot: dict[str, Any]) -> list[dict[str, str]]:
+    """Raise ValueError (all errors, with what to do) or return the warnings."""
+    issues = direction_issues(shot)
+    errors = [i["message"] for i in issues if i["level"] == "error"]
+    if errors:
+        raise ValueError("; ".join(errors))
+    return [i for i in issues if i["level"] == "warning"]

@@ -89,7 +89,16 @@ One agent loop with four project-scoped tools (`list`, `read`, `write`, `propose
   - **reported:** the provider's raw usage;
   - **calculated:** our list-price estimate, with its method and certainty; the first live run is marked *incomplete*;
   - **confirmed:** only what you enter from the billing console.
-- **Shot direction rules:** start framing, end framing (`end_framing`), pace (`camera_detail`, never restating the move) and duration are separate. A duration change reports its cost impact. Vague or unsupported feedback should get a question, not an invented edit. This is verified with the scripted agent; live-model adherence to the updated skill is untested.
+- **Shot direction rules:** start framing, end framing (`end_framing`), pace (`camera_detail`) and duration are separate. Impossible combinations (a push-in that ends wider, an end framing on a static camera, beats past the duration) are refused; redundant or ambiguous wording (restating the move, "ends on her eyes" without `end_framing`) is accepted with a visible warning. A duration change reports its cost impact. Vague or unsupported feedback should get a question, not an invented edit. This is verified with the scripted agent; live-model adherence to the updated skill is untested.
+
+## Demo project
+
+```bash
+.venv/bin/python scripts/demo.py seed --base http://127.0.0.1:8700        # "Last Tram": brief, @oli v1/v2, @street, decision, scene
+.venv/bin/python scripts/demo.py rehearse --base http://127.0.0.1:8700    # all 8 steps on fake outputs; refuses on a paid adapter
+```
+
+`--images DIR` swaps in your own images (same file names as `samples/`). `--stop-after N` pauses the rehearsal at step N. The live plan and its caps are in [docs/M5_APPROVAL_BRIEF.md](docs/M5_APPROVAL_BRIEF.md).
 
 ## Tests
 

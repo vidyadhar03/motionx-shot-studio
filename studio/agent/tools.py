@@ -296,10 +296,16 @@ class AgentTools:
                 label = lambda refs: [f"@{r['handle']} v{r['version']}" for r in  # noqa: E731
                                       self.ops.resolve_refs(refs if isinstance(refs, str) else json.dumps(refs))]
                 changed["refs"] = {"from": label(before["refs"]), "to": label(after["refs"])}
-            return {"ok": True, "shot": sid, "revision": after["revision"], "changed": changed}
+            out = {"ok": True, "shot": sid, "revision": after["revision"], "changed": changed}
+            if after["direction_warnings"]:             # accepted, but worth a second look
+                out["warnings"] = [w["message"] for w in after["direction_warnings"]]
+            return out
         if path == "/shots":
             s = self.ops.create_shot(self.pid, patch, author="agent")
-            return {"ok": True, "created": f"/shots/{s['id']}", "revision": s["revision"]}
+            out = {"ok": True, "created": f"/shots/{s['id']}", "revision": s["revision"]}
+            if s["direction_warnings"]:
+                out["warnings"] = [w["message"] for w in s["direction_warnings"]]
+            return out
         if path == "/scenes":
             sc = self.ops.create_scene(self.pid, str(patch.get("name", "")))
             return {"ok": True, "created": f"/scenes/{sc['id']}"}

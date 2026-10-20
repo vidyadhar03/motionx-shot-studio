@@ -32,7 +32,7 @@ No `AGENTS.md` or `CLAUDE.md` exists in spike, video-harness, locvis or location
 | **M2** | Fri 23 – Sat 24 | Project-scoped Character/Location/Prop assets with immutable versions, scenes, the reference path (`h3_reference` via `MinimaxHailuo03ReferenceNode`, 1–9 images, "Image N" binding), capability errors in the UI | **Done (2026-10-20) on the fake adapter plus offline ComfyUI graph validation.** No real reference-to-video generation has run (§5b) |
 | **M3** | Sun 25 – Mon 26 | Agent: one loop, 4 project-scoped tools, `skills/shot-direction.md`, persisted threads and tool ledger; providers scripted (dev default), **Gemini (default live)**, Anthropic; LLM spend cap | **Done (2026-10-20) with the scripted provider and mocked SDK tests.** No live LLM call has been made (§5c) |
 | **M4** | Tue 27 – Wed 28 | Export (selected takes + manifest), cancellation, README check from a clean clone, direction fixes from the live test, LLM cost accounting | **Done (2026-10-20) offline:** fake video, scripted agent, mocked SDKs (§5d). No paid or live calls |
-| **M5** | Thu 29 | Demo project with licensed inputs, demo video, publish (needs approval), submit | Planned |
+| **M5** | Thu 29 | Demo project with licensed inputs, demo video, publish (needs approval), submit | **Preparation done (2026-10-21) offline:** "Last Tram" demo seeded and rehearsed end to end with fake outputs (§5f). Live stages A–D await approval in `docs/M5_APPROVAL_BRIEF.md` |
 
 ## 3. Local execution setup (verified 2026-10-20)
 
@@ -237,6 +237,25 @@ A fresh `git clone` of commit `510696e` into an empty directory. No `.env`, `dat
 - A submission through the proxy and `comfy_check.py balance`: these need a key, and a probe sends an unauthenticated request to api.comfy.org.
 - Any paid generation (none authorised) and any live LLM call (none authorised).
 - Cold-cache install time and download size.
+
+## 5f. M5 preparation (offline only: fake video, scripted agent; no live or paid calls)
+
+- **Direction checks split into errors and warnings.** The checks below still **refuse** the write, because the prompt would be impossible or would drop the input:
+  - an end framing without a start framing;
+  - a push-in ending wider, or a pull-out ending tighter;
+  - an end framing on a static camera;
+  - camera detail without a camera move;
+  - beats timed past the duration;
+  - length limits.
+
+  These are now **warnings**: restating the move, mentioning another move (or zoom/crane), implying a tighter end without `end_framing`, an end equal to the start, and a pan/tilt changing size. The write is accepted; the shot carries `direction_warnings`, the editor shows them, and the agent's `write` result lists them.
+- **Demo "Last Tram"** (`scripts/demo.py seed|rehearse`): rights-clear synthetic assets only (`samples/`), one scene, a recorded "no score" decision. `rehearse` refuses unless the app reports the fake adapter and the scripted agent. It runs all eight journey steps through the HTTP API and checks the export hashes.
+- **Scripted first-shot plan** (references → draft shot → pending proposal) and a matching skill section, so the "agent proposes the first shot" step can be rehearsed offline. Like the rest of the scripted provider, it is rule-based and proves plumbing, not model quality.
+- **Fake clips** (ffmpeg mode) carry a burned-in "FAKE OUTPUT" banner.
+- **UI fixes found in rehearsal:**
+  - The duration select lacked 7 s, so a 7 s shot displayed as "4s".
+  - At widths ≥ 1250 px the floating agent panel covered take cards; it now has its own grid column.
+- **Tests:** 119 pass. The brief, rehearsal screenshots and reference sheet are in `docs/M5_APPROVAL_BRIEF.md` and `docs/demo/`.
 
 ## 6. Main risks
 
