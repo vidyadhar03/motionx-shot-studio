@@ -57,6 +57,7 @@ The app enforces this through `.env`: `STUDIO_MAX_PAID_ATTEMPTS=1` and `STUDIO_B
 |---|---|---|
 | 2026-10-20, one bounded test | Gemini `gemini-3.8-flash` only, ≤ 8 model requests, 2,048 output tokens per request, thinking `low`, ≤ $0.10, no retries, no repeat sessions | **Used: 5 requests.** Live calls are disabled again (`STUDIO_AGENT_MAX_LIVE_REQUESTS=0`, budget 0) pending review |
 | 2026-10-21, demo Stage A (planning only) | Gemini `gemini-3.8-flash` only, one session, ≤ 8 model requests, $0.15 estimate-based cap, 4,096 output tokens, thinking `low`, no retries/fallback/cap increases, no image or video, no plan approval | **Used: 6 requests, calculated $0.033141.** Live calls disabled again (defaults: scripted, budget 0, 0 requests) pending review |
+| 2026-10-21, shot-1 revision session | Gemini `gemini-3.8-flash` only, one session, ≤ 8 new model requests, $0.10 new estimate-based cap (cumulative caps 14 requests / $0.133141 in this folder), 4,096 output tokens, thinking `low`, no retries/fallback/cap increases, no image/video | **Used: 5 requests, calculated $0.019766.** Live calls disabled again |
 
 ### Live run 1: 2026-10-20 ~03:18–03:19 local, isolated project `data-live1` (synthetic assets, fake video adapter)
 
@@ -291,3 +292,35 @@ The app enforces this through `.env`: `STUDIO_MAX_PAID_ATTEMPTS=1` and `STUDIO_B
 - Every cap is 0 by default.
 - The take is **unreviewed and unselected**, awaiting the owner's review.
 - First visual note (provisional): from about 2.5 s the phone glow on his face is bright rather than subtle.
+
+### Live run 3 (shot-1 revision): 2026-10-21 14:29:48–14:30:19 UTC, `data-flyover-live`
+
+**Before the run (no model call).**
+- The owner's review of take `tk_ad8bfc16048345d0` was recorded verbatim as feedback ("5/10, needs revision" plus the comment), with the approved direction as five separate feedback notes.
+- Review state `rejected` (the app has only approved/rejected); the take stays unselected and preserved.
+
+**Session.**
+- 5 requests, 8 tool calls, stop = model finished.
+- Calls:
+  - `read` skill, decisions, shot, take 1, @boy v2, @underpass v2;
+  - `write /shots/sht_d421039b6c2640fd` (`expected_revision` 6 → **revision 7, author agent**);
+  - `propose_generation` (parent take 1) → **`prp_c03a880b0da24a7a`**, pending.
+- Camera:
+  - Gemini chose `camera_move: tracking`, with `camera_detail` "Short, slow lateral slide to the right along the curve, keeping @boy framed and creating subtle parallax…".
+  - It explained that no truck/sideways preset exists and that `pan_right` rotates without parallax.
+- No direction warnings and no video blockers.
+- Proposal: 5 s, 768P, 16:9, seed 2995113552 (the shot's locked seed, the same as take 1); @boy v2 + @underpass v2; **135.78 credits** estimated.
+- Not approved; video caps 0.
+
+**Usage.**
+
+| Request | Input | Output | Thought | Tool use | Pre-call estimate | Calculated |
+|---|---|---|---|---|---|---|
+| 1 | 2,331 | 105 | 0 | 0 | $0.0326 | $0.002142 |
+| 2 | 2,460 | 41 | 0 | 0 | $0.0362 | $0.001999 |
+| 3 | 4,693 | 209 | 0 | 0 | $0.0391 | $0.004304 |
+| 4 | 4,908 | 150 | 0 | 0 | $0.0397 | $0.004243 |
+| 5 | 5,067 | 874 | 0 | 0 | $0.0404 | $0.007078 |
+| **Total** | 19,459 | 1,379 | 0 | 0 | – | **$0.019766** |
+
+The folder's cumulative live total is now 11 requests and $0.052907 calculated. Nothing is confirmed by billing.
