@@ -250,3 +250,44 @@ The app enforces this through `.env`: `STUDIO_MAX_PAID_ATTEMPTS=1` and `STUDIO_B
 - **Shot s1, revision 4** (author `user`): the owner's direction for the action (squats on open soil right of the belongings, in front of the large pillar, phone held vertically, warm amber light, subtle phone glow, no readable text) and the sound (ambient traffic, no music).
 - **Pending video proposal `prp_6cb6c0391728447b`**: `h3_reference`, 5 s, 768P, 16:9, seed 2995113552. Image 1 = @boy v1, Image 2 = @underpass v2. **135.78 credits** estimated. Paid route, `created_by` user, **not approved or submitted**.
 - `.env` video caps were set from 140/1 to **0/0**, so every cap is 0 by default.
+
+## Paid video run 2 (demo shot 1): 2026-10-21 14:05:12–14:08:45 UTC, `data-flyover-live`
+
+**Authorisation:** the owner approved one run of the corrected shot-1 proposal: a cap of 140 credits, one attempt, no retries or resubmission, no LLM, image or s2/s3 generation.
+
+**Wording fixes first (no model call).**
+- @boy **v2** = the same image bytes as v1 (`3ccd9499…`), with the description minus "unidentifiable". Chosen by the owner and pinned to s1–s3; v1 is kept.
+- Shot s1 revision 6: redundant `camera_detail` removed; seed locked to 2995113552.
+- `prp_6cb6c0391728447b` became `stale` ("shot changed") and is kept.
+- The fresh proposal `prp_b2ae336551dc4680` differs only by the two removed phrases; settings, seed and reference bytes are identical.
+
+**Pre-flight (all passed before submitting).** Checked that:
+- the proposal was pending and fresh;
+- the route was the paid one, `h3_reference`;
+- 5 s / 768P / 16:9 / seed 2995113552;
+- the references were @boy v2 + @underpass v2;
+- the estimate was 135.78 ≤ 140;
+- no takes were in flight;
+- the balance was 913.79.
+
+**Submitted (exact).**
+- Prompt = `prp_b2ae336551dc4680.resolved_prompt` (recorded in the take snapshot).
+- Image 1 = @boy v2 (832×1248), Image 2 = @underpass v2 (1672×941).
+- MiniMax H3, 5 s, 768P, 16:9, seed 2995113552.
+
+**Result.**
+- **Succeeded**: take `tk_ad8bfc16048345d0` (#1), job `37cecf8e-4580-468a-9ba0-098f2e865403`.
+- Timing: queued 14:05:15, submitted 14:05:16, generated 14:08:42, saved 14:08:42. **208.7 s** end to end; about 3 min 26 s from submission to output.
+- Output: MP4 H.264 1344×768 at 24 fps, AAC stereo at 32 kHz, 5.17 s, 1,119,089 bytes, sha256 `2c00a49e…`.
+- 1 submission, no retries.
+
+**Charge.**
+- Balance 913.79 → 778.01, so **observed 135.78 credits** (= the estimate). Recorded in the spend ledger.
+
+**Checks.** The key wasn't found in the video, the data folder or the ComfyUI output.
+
+**After.**
+- ComfyUI and the proxy stopped.
+- Every cap is 0 by default.
+- The take is **unreviewed and unselected**, awaiting the owner's review.
+- First visual note (provisional): from about 2.5 s the phone glow on his face is bright rather than subtle.
