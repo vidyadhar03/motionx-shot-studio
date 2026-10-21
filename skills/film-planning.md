@@ -31,6 +31,7 @@ If the brief is ambiguous about something a shot depends on, ask instead of gues
   each second costs about 27 credits on the video route), `audio` (diegetic sound; say "no music"
   when there should be none), and `assets` (handles the shot needs, character first, then location,
   then props; at most 5 keeps the base video price).
+- Optional per shot: `depth_of_field` (shallow / moderate / deep) and `lighting_detail` (where the light comes from, its colour and strength). Leave them unset unless the brief or the person asks for them; don't invent a depth-of-field choice.
 - A static camera can still change framing if the subject moves; the app warns so you describe the
   movement in `action`. Warnings are accepted; errors are not.
 

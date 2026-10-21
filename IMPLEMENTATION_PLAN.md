@@ -34,6 +34,7 @@ No `AGENTS.md` or `CLAUDE.md` exists in spike, video-harness, locvis or location
 | **M4** | Tue 27 – Wed 28 | Export (selected takes + manifest), cancellation, README check from a clean clone, direction fixes from the live test, LLM cost accounting | **Done (2026-10-20) offline:** fake video, scripted agent, mocked SDKs (§5d). No paid or live calls |
 | **M5** | Thu 29 | Demo project with licensed inputs, demo video, publish (needs approval), submit | Prep tooling done (2026-10-21, §5f). The "Last Tram" demo was **replaced** by "Under the Flyover" (§5g). Live stages await approval in `docs/DEMO_APPROVAL_BRIEF.md` |
 | **M6** | Tue 21 – Thu 23 | Idea → reviewable film plan (revisions, explicit approval) → asset preparation (Upload or Generate, one image workflow, human choice of generated versions) → existing shot/take flow. Remaining framing restrictions relaxed | **Done (2026-10-21) offline:** fake adapter, replay mock and scripted agent; graphs validated offline (§5g). No live calls |
+| **M7** | Tue 21 | Three creative controls: truck left/right, optional depth of field, optional lighting detail (prompt descriptors through shared definitions) | **Done (2026-10-21) offline** (§5h). No live calls |
 
 ## 3. Local execution setup (verified 2026-10-20)
 
@@ -281,6 +282,18 @@ A fresh `git clone` of commit `510696e` into an empty directory. No `.env`, `dat
 - **Tests:** 145 pass.
 
 **Not verified:** any live model behaviour (plan quality, nested tool schema on Gemini, Seedream output or content-policy handling, H3 with these references), and real image charges.
+
+## 5h. M7: creative controls (offline only)
+
+| Item | Result |
+|---|---|
+| Truck left/right | New `camera_move` presets: sideways translation without turning, distinct from pan and tracking; existing presets unchanged. Warnings for detail naming another move, restating the truck, or a truck that changes size (allowed) |
+| Depth of field | Optional `shots.depth_of_field` (shallow / moderate / deep), compiled after the lens look. Warned if text contradicts it. Unset by default |
+| Lighting detail | Optional `shots.lighting_detail` (≤ 200 chars), compiled after the lighting preset, or as "Lighting: …". Warned when `action` also describes light |
+| Shared paths | One `PRESETS` definition → API/UI dropdowns, agent schema enums, shot and plan validation, skills. Fields in revisions, plan shots, snapshots, exports; freshness via shot revision |
+| Compatibility | Additive migration. Prompts unchanged when the new fields are unset: both real takes' submitted prompts and the pending demo proposal `prp_c03a880b0da24a7a` recompile byte-for-byte on database copies; the proposal stays fresh |
+| Verification | 167 tests; UI typecheck and build; a fake-mode walkthrough. Agent path: labelled replay mock writing `truck_right` + `lighting_detail` and proposing. Manual path: editor set truck left, shallow, lighting detail; warnings shown; prompt compiled |
+| Later (not built) | Genre/tone, era and palette shortcut lists that keep custom text; a camera-angle field |
 
 ## 6. Main risks
 

@@ -101,6 +101,8 @@ CREATE TABLE IF NOT EXISTS shots (
   audio TEXT NOT NULL DEFAULT '',                -- sound direction ("rain on cobbles, no music")
   locked INTEGER NOT NULL DEFAULT 0,             -- 1 = human-locked: agent writes refused
   end_framing TEXT,                              -- framing the move reaches by the end (NULL = unchanged)
+  depth_of_field TEXT,                           -- M7, optional preset (NULL = not set)
+  lighting_detail TEXT NOT NULL DEFAULT '',      -- M7, optional words qualifying the lighting preset
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -405,7 +407,8 @@ class Database:
                   ("camera_detail", "TEXT NOT NULL DEFAULT ''"),
                   ("audio", "TEXT NOT NULL DEFAULT ''"),
                   ("locked", "INTEGER NOT NULL DEFAULT 0"),
-                  ("end_framing", "TEXT")],
+                  ("end_framing", "TEXT"), ("depth_of_field", "TEXT"),
+                  ("lighting_detail", "TEXT NOT NULL DEFAULT ''")],
         "takes": [("cancel_requested_at", "TEXT"), ("cancel_outcome", "TEXT")],
         "asset_versions": [("origin", "TEXT NOT NULL DEFAULT 'upload'"), ("generation_id", "TEXT"),
                            ("provenance", "TEXT NOT NULL DEFAULT ''"), ("needs_review", "INTEGER NOT NULL DEFAULT 0")],

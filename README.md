@@ -92,6 +92,11 @@ One agent loop with four project-scoped tools (`list`, `read`, `write`, `propose
   - **reported:** the provider's raw usage;
   - **calculated:** our list-price estimate, with its method and certainty; the first live run is marked *incomplete*;
   - **confirmed:** only what you enter from the billing console.
+- **Creative controls (M7):**
+  - camera moves include `truck_left`/`truck_right` (sideways, parallax), distinct from pan and tracking;
+  - optional `depth_of_field` (shallow / moderate / deep);
+  - optional `lighting_detail` (source, colour, strength).
+  Like every look control, they become prompt text, not calibrated parameters. The same definitions drive the editor, Gemini's tool schema, plans and the skills.
 - **Shot direction rules:** start framing, end framing (`end_framing`), pace (`camera_detail`) and duration are separate. Invalid input (an end framing without a start, camera detail without a move, beats past the duration) is refused. Creative combinations are accepted with a visible warning: a static camera whose subject walks into a closer framing, a push-in that stays within one size, restating the move, or "ends on her eyes" without `end_framing`. A duration change reports its cost impact. Vague or unsupported feedback should get a question, not an invented edit. This is verified with the scripted agent; live-model adherence to the updated skill is untested.
 
 ## Film plan and asset preparation (M6)

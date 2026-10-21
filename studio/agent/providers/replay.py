@@ -89,6 +89,10 @@ class ReplayProvider:
         if not isinstance(v, str) or "{{r:" not in v:
             return v
 
+        whole = _REF.fullmatch(v)
+        if whole:                                     # the entire value is one reference: keep its type (e.g. int)
+            return self._lookup(whole, u, results)
+
         def value(m: re.Match) -> str:
             node: Any = results.get(f"m{u}-t{m.group(1)}c{m.group(2)}", {}).get("content", {})
             for part in m.group(3).split("."):
@@ -98,6 +102,15 @@ class ReplayProvider:
                 raise ProviderConfigError(f"replay script refers to a missing value: {m.group(0)}")
             return str(node)
         return _REF.sub(value, v)
+
+    def _lookup(self, m: re.Match, u: int, results: dict[str, dict]) -> Any:
+        node: Any = results.get(f"m{u}-t{m.group(1)}c{m.group(2)}", {}).get("content", {})
+        for part in m.group(3).split("."):
+            node = node.get(part) if isinstance(node, dict) else (
+                node[int(part)] if isinstance(node, list) and part.isdigit() and int(part) < len(node) else None)
+        if node is None:
+            raise ProviderConfigError(f"replay script refers to a missing value: {m.group(0)}")
+        return node
 
     def _say(self, text: str) -> Turn:
         return Turn(items=[{"role": "assistant", "text": text, "tool_calls": []}], text=text, tool_calls=[],

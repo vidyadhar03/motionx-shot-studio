@@ -31,13 +31,19 @@ PRESETS: dict[str, dict[str, str]] = {
         "arc": "Slow arc around the subject.",
         # Translation, not rotation: the camera body slides sideways without turning (unlike a pan) and doesn't
         # follow a moving subject (unlike tracking), so nearer objects pass faster than distant ones (parallax).
-        "truck_left": "Slow sideways truck to the left: the camera travels parallel to the scene without turning, so the foreground shifts against the background.",
-        "truck_right": "Slow sideways truck to the right: the camera travels parallel to the scene without turning, so the foreground shifts against the background.",
+        "truck_left": "Slow sideways truck to the left, the camera travelling parallel to the scene without turning, so the foreground shifts against the background.",
+        "truck_right": "Slow sideways truck to the right, the camera travelling parallel to the scene without turning, so the foreground shifts against the background.",
     },
     "lens_look": {
         "clean": "Clean, sharp modern digital look.",
         "anamorphic": "Anamorphic look: wide aspect feel, oval bokeh, horizontal flares.",
         "vintage": "Vintage lens look: soft edges, gentle halation, warm contrast.",
+    },
+    # Optional (M7). Describes the look; not a lens aperture or focus distance, and not calibrated.
+    "depth_of_field": {
+        "shallow": "Shallow depth of field: the subject in focus, the background softly out of focus.",
+        "moderate": "Moderate depth of field: the subject sharp, the background slightly soft but readable.",
+        "deep": "Deep depth of field: foreground and background both in focus.",
     },
     "lighting": {
         "natural_day": "Soft natural daylight.",
@@ -81,7 +87,7 @@ def compile_prompt(project: dict[str, Any], shot: dict[str, Any], refs: list[dic
         parts.append(shot["intention"].strip().rstrip(".") + ".")
     if shot.get("action"):
         parts.append(shot["action"].strip().rstrip(".") + ".")
-    for control in ("framing", "camera_move", "lens_look", "lighting"):
+    for control in ("framing", "camera_move", "lens_look", "depth_of_field", "lighting"):
         key = shot.get(control)
         if key:
             if key not in PRESETS[control]:
@@ -91,10 +97,16 @@ def compile_prompt(project: dict[str, Any], shot: dict[str, Any], refs: list[dic
             detail = (shot.get("camera_detail") or "").strip().rstrip(".")
             if control == "camera_move" and detail:
                 phrase = f"{phrase.rstrip('.')}: {detail}."
+            light = (shot.get("lighting_detail") or "").strip().rstrip(".")
+            if control == "lighting" and light:
+                phrase = f"{phrase.rstrip('.')}: {light}."
             parts.append(phrase)
             end = shot.get("end_framing")
             if control == "framing" and end and end != key:
                 parts.append(end_framing_phrase(key, end, shot.get("camera_move")))
+    light = (shot.get("lighting_detail") or "").strip().rstrip(".")
+    if light and not shot.get("lighting"):
+        parts.append(f"Lighting: {light}.")
     direction = project.get("direction") or {}
     style = [direction.get(k, "").strip() for k in ("tone", "era", "palette", "notes")]
     style = [s for s in style if s]
@@ -144,7 +156,13 @@ PRESET_FAMILY = {"static": "static", "push_in": "push", "pull_out": "pull", "pan
                  "truck_left": "truck", "truck_right": "truck"}
 _SECONDS = re.compile(r"(\d+(?:\.\d+)?)(?:\s*[-\u2013]\s*(\d+(?:\.\d+)?))?\s*(?:s|sec|secs|second|seconds)\b",
                       re.IGNORECASE)
-MAX_CAMERA_DETAIL, MAX_AUDIO = 200, 300
+MAX_CAMERA_DETAIL, MAX_AUDIO, MAX_LIGHTING_DETAIL = 200, 300, 200
+_LIGHT_WORDS = re.compile(r"\b(light|lights|lit|lighting|glow\w*|illuminat\w*|streetlights?|shadows?|backlit|silhouetted?)\b",
+                          re.IGNORECASE)
+_DOF_CONFLICTS = {
+    "deep": ("shallow focus", "shallow depth", "bokeh", "background blurred", "blurred background", "out of focus"),
+    "shallow": ("deep focus", "everything in focus", "everything sharp", "all in focus"),
+}
 # The words that NAME a move (a detail must not restate its own preset; it describes pace and end point only).
 MOVE_NAMES: dict[str, tuple[str, ...]] = {
     "static": ("static", "locked-off", "locked off"), "push": ("push in", "push-in", "dolly in", "push "),
@@ -173,6 +191,19 @@ def direction_issues(shot: dict[str, Any]) -> list[dict[str, str]]:
         err("detail_too_long", f"camera_detail is {len(detail)} characters; keep it under {MAX_CAMERA_DETAIL}")
     if len(audio) > MAX_AUDIO:
         err("audio_too_long", f"audio is {len(audio)} characters; keep it under {MAX_AUDIO}")
+    light = (shot.get("lighting_detail") or "").strip()
+    if len(light) > MAX_LIGHTING_DETAIL:
+        err("lighting_detail_too_long", f"lighting_detail is {len(light)} characters; keep it under {MAX_LIGHTING_DETAIL}")
+    if light and _LIGHT_WORDS.search(shot.get("action") or ""):
+        warn("lighting_in_action", "action also describes light while lighting_detail is set; keep light sources, colour "
+                                   "and strength in lighting_detail and what happens in action, so the prompt doesn't "
+                                   "repeat or contradict itself")
+    dof = shot.get("depth_of_field")
+    if dof in _DOF_CONFLICTS:
+        said = " ".join(shot.get(k) or "" for k in ("action", "camera_detail", "lighting_detail")).lower()
+        hits = [w for w in _DOF_CONFLICTS[dof] if w in said]
+        if hits:
+            warn("depth_of_field_conflict", f"depth_of_field is {dof} but the text says '{hits[0]}'; keep one choice")
     framing, end, move = shot.get("framing"), shot.get("end_framing"), shot.get("camera_move")
     if end:
         if not framing:
@@ -211,7 +242,7 @@ def direction_issues(shot: dict[str, Any]) -> list[dict[str, str]]:
                 warn("detail_implies_end", f"camera_detail implies the shot ends closer than its {framing} "
                                            "framing; set end_framing (e.g. close_up) to make the end size explicit")
     duration = int(shot.get("duration_s") or 5)
-    for field in ("action", "camera_detail", "audio"):
+    for field in ("action", "camera_detail", "audio", "lighting_detail"):
         for m in _SECONDS.finditer(shot.get(field) or ""):
             t = max(float(x) for x in m.groups() if x)
             if t > duration:

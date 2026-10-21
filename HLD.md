@@ -191,7 +191,7 @@ Since M5 the checks have two levels (relaxed further in M6: framing changes the 
 
 | Instruction kind | Lands in | Rule enforced in code |
 |---|---|---|
-| Which move ("push in", "track") | `camera_move` preset | One preset per shot |
+| Which move ("push in", "track") | `camera_move` preset | One preset per shot. M7 adds `truck_left`/`truck_right`: sideways translation without turning (parallax), distinct from a pan (rotation) and tracking (following a moving subject). Detail naming another move, restating the truck, or a truck that also changes size are **warnings** |
 | Where the shot ends ("end on her eyes") | **`end_framing`** (M4). Rendered as "The move carries the frame to …" when the camera produces the change (push-in tighter, pull-out wider, tracking/handheld/arc), otherwise "By the end of the shot the subject's movement brings the framing to …" (M6) | **Refused:** no starting `framing`. **Warned:** end equal to start; a change the camera doesn't make (static, pan/tilt, push-in ending wider, pull-out ending tighter): describe the subject's movement in `action`. A push-in may stay within one framing size |
 | How the move behaves ("slower", "starts after 2 s") | `camera_detail` (≤ 200 chars), rendered right after the preset phrase | **Refused:** `camera_move` empty (the detail would be dropped). **Warned (M5, refused in M4):** names a different move (a combined move may be deliberate; zoom/crane have no preset), restates its own preset, implies a tighter ending ("eyes", "close-up") on a wide/medium shot without `end_framing` |
 | Timing ("hold 2 s, then she turns") | `duration_s` (4–15) plus timed beats in `action` ("0–2s: …; 2–5s: …") | Any time mentioned in `action` or `camera_detail` must be ≤ `duration_s` |
@@ -199,6 +199,8 @@ Since M5 the checks have two levels (relaxed further in M6: framing changes the 
 | Vague or unsupported notes | No edit. The agent explains the limit or asks which aspect to change | Skill rule; the scripted provider does this; untested live |
 | Sound ("rain on cobbles, no music") | **new** `audio` (≤ 300 chars), rendered as `Sound: …` | H3 always generates audio; this steers it. Not a guarantee |
 | Lighting / lens / framing | existing presets | Changing the preset is the only way; free text doesn't restate them |
+| Where light comes from, its colour and strength (M7) | optional `lighting_detail` (≤ 200 chars), rendered after the lighting preset ("…pools of light: warm amber streetlight; soft, steady phone glow."), or as "Lighting: …" without a preset | Warned when `action` also describes light (keep light in one place). It organises the instruction; it doesn't guarantee adherence |
+| How much is in focus (M7) | optional `depth_of_field`: shallow / moderate / deep, rendered after the lens look | A look, not an aperture. Warned when text contradicts it ("bokeh" with deep) |
 | Story, performance, blocking | `intention` / `action` | – |
 
 Compile order:
@@ -517,3 +519,20 @@ Facts below come from the installed templates and the ComfyUI 0.42.1 node source
   - It is not a model.
   - When a tool refuses, it stops and says so.
   - The demo story lives only in `demo/flyover/` (data and mock), not in production agent code.
+
+## 12. Creative controls added in M7 (2026-10-21)
+
+- **Added:**
+  - `truck_left`/`truck_right` camera moves;
+  - optional `depth_of_field` (shallow / moderate / deep);
+  - optional `lighting_detail` text.
+- **All prompt descriptors:** none is a calibrated camera, lens or lighting parameter. The H3 node has no such inputs: its only parameters are prompt, resolution, ratio, duration, seed and reference media.
+- **One shared definition**, `PRESETS` in `studio/compiler.py`, feeds:
+  - `/api/presets` and the editor dropdowns;
+  - the agent's `write` schema enums;
+  - shot and plan validation;
+  - the direction checks;
+  - the skills.
+- **Records:** the new fields are part of shot revisions, plan shots, proposal freshness (any field change bumps the shot revision), take snapshots and exports.
+- **Old prompts:** unset by default. Prompts without them are byte-identical: verified by recompiling both real takes' submitted prompts and the pending demo proposal on database copies.
+- **Possible later additions, not built:** shortcut lists for genre/tone, era and palette in the project direction, keeping the custom text. Also a camera-angle field (eye level / low / high).

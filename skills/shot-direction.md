@@ -54,6 +54,8 @@ Don't lengthen past 15 s. If the note needs more, suggest splitting into shots i
 | timing ("hold 2 s, then she turns") | `duration_s` and timed beats in `action`: `0–2s: …; 2–5s: …` | mention a time beyond `duration_s`; that's refused |
 | sound ("rain, no music", "her breath only") | `audio` (≤ 300 chars) | promise exact sync; the audio is generated, so steer it |
 | lighting, lens look | the presets `lighting`, `lens_look` | restate them in free text |
+| where light comes from, its colour or strength ("the phone glow is too bright", "warm light from the right") | `lighting_detail` (optional, ≤ 200 chars), rendered after the lighting preset | put light into `action` too; the app warns when both describe light |
+| how much is in focus ("isolate him", "show the whole street sharp") | `depth_of_field`: shallow / moderate / deep (optional) | set it when nobody asked; contradict it in text (warned) |
 | identity or wardrobe drift in Reference mode | update `refs` to the asset's newer version if one exists | edit assets; people own them. If there is no newer version, say so |
 | performance, blocking, story | `intention`, `action` | – |
 
@@ -75,6 +77,8 @@ Presets:
 - `camera_move`: static, push_in, pull_out, pan_left, pan_right, tilt_up, tilt_down, tracking, handheld, arc, truck_left, truck_right
 - `lens_look`: clean, anamorphic, vintage
 - `lighting`: natural_day, golden_hour, low_key_night, practicals, backlit
+- `depth_of_field` (optional): shallow, moderate, deep
+- `lighting_detail` (optional text): direction, colour and strength of the light. Like every control here it is a prompt descriptor; it organises the instruction but doesn't guarantee the model follows it more closely.
 
 ## Writing for H3
 

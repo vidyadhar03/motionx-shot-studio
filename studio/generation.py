@@ -319,6 +319,7 @@ class GenerationService:
             "project": {"id": project["id"], "name": project["name"], "direction": json.loads(project["direction"])},
             "shot": {k: shot.get(k) for k in ("id", "revision", "title", "scene", "scene_id", "mode", "intention",
                                               "action", "framing", "camera_move", "lens_look", "lighting",
+                                              "camera_detail", "end_framing", "depth_of_field", "lighting_detail", "audio",
                                               "duration_s", "resolution", "aspect_ratio", "seed",
                                               "start_frame_sha", "refs")},
             "proposal": {"id": p["id"], "created_by": p["created_by"], "created_at": p["created_at"],

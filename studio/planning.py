@@ -15,7 +15,7 @@ from .db import Database, dumps, new_id, now
 from .ops import ASSET_KINDS, ConflictError, NotFoundError, Ops, _validate_shot_patch
 
 PLAN_SHOT_FIELDS = ("title", "intention", "action", "framing", "end_framing", "camera_move", "camera_detail",
-                    "lens_look", "lighting", "duration_s", "audio", "aspect_ratio")
+                    "lens_look", "depth_of_field", "lighting", "lighting_detail", "duration_s", "audio", "aspect_ratio")
 ASSET_SOURCES = ("upload", "generate", "either")
 _KEY = re.compile(r"^[a-z0-9][a-z0-9_-]{0,23}$")
 LIMITS = {"title": 120, "logline": 300, "treatment": 3000, "list_item": 400, "list_len": 12, "shots": 6,

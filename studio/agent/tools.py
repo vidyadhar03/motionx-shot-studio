@@ -40,6 +40,11 @@ PATCH_SCHEMA = {
         "camera_detail": {"type": "string", "description": "How the chosen camera_move behaves (pace, end point). Must not name a different move."},
         "lens_look": {"type": "string", "enum": list(PRESETS["lens_look"])},
         "lighting": {"type": "string", "enum": list(PRESETS["lighting"])},
+        "lighting_detail": {"type": "string", "description": "Optional, <= 200 chars: where the light comes from, its colour "
+                            "and strength (e.g. 'warm amber streetlight from the right; soft, steady phone glow on his face'). "
+                            "Keep lighting here rather than in action. A prompt descriptor, not a calibrated light."},
+        "depth_of_field": {"type": "string", "enum": list(PRESETS["depth_of_field"]),
+                           "description": "Optional look: shallow, moderate or deep. Leave unset unless the shot needs it."},
         "audio": {"type": "string", "description": "Sound direction."},
         "duration_s": {"type": "integer", "minimum": 4, "maximum": 15},
         "mode": {"type": "string", "enum": ["first_frame", "reference"]},
@@ -53,7 +58,8 @@ PATCH_SCHEMA = {
         "scene": {"type": "object", "properties": {"name": _STR}},
         "shots": {"type": "array", "description": "Plan: about three shots.", "items": {"type": "object", "properties": {
             "key": _STR, "title": _STR, "intention": _STR, "action": _STR, "framing": _STR, "end_framing": _STR,
-            "camera_move": _STR, "camera_detail": _STR, "lighting": _STR, "lens_look": _STR,
+            "camera_move": _STR, "camera_detail": _STR, "lighting": _STR, "lighting_detail": _STR, "lens_look": _STR,
+            "depth_of_field": _STR,
             "duration_s": {"type": "integer"}, "audio": _STR, "assets": {"type": "array", "items": _STR}}}},
         "assets": {"type": "array", "description": "Plan: assets the shots need.", "items": {"type": "object", "properties": {
             "handle": _STR, "kind": _STR, "name": _STR, "description": _STR, "source": _STR,
@@ -91,7 +97,7 @@ SPECS = [
 ]
 
 _SHOT_KEYS = ("id", "revision", "locked", "title", "scene_id", "mode", "intention", "action", "framing", "camera_move",
-              "camera_detail", "lens_look", "lighting", "audio", "duration_s", "resolution", "aspect_ratio",
+              "camera_detail", "lens_look", "lighting", "lighting_detail", "depth_of_field", "audio", "duration_s", "resolution", "aspect_ratio",
               "start_frame_sha", "selected_take_id")
 
 

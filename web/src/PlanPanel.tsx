@@ -87,16 +87,18 @@ export default function PlanPanel({ projectId, presets, onApproved, onOpenShot, 
               <div className="form">
                 <label>Action<textarea rows={2} value={s.action ?? ""} onChange={(e) => setShot(i, { action: e.target.value })} /></label>
                 <div className="row">
-                  {(["framing", "end_framing", "camera_move"] as const).map((k) => (
+                  {(["framing", "end_framing", "camera_move", "depth_of_field"] as const).map((k) => (
                     <label key={k}>{k.replace("_", " ")}
                       <select value={s[k] ?? ""} onChange={(e) => setShot(i, { [k]: e.target.value || null })}>
                         <option value="">—</option>
-                        {presets.presets[k === "end_framing" ? "framing" : k].map((v) => <option key={v} value={v}>{v.replace(/_/g, " ")}</option>)}
+                        {(presets.presets[k === "end_framing" ? "framing" : k] ?? []).map((v) => <option key={v} value={v}>{v.replace(/_/g, " ")}</option>)}
                       </select></label>
                   ))}
                   <label>Duration<select value={s.duration_s} onChange={(e) => setShot(i, { duration_s: Number(e.target.value) })}>
                     {Array.from({ length: 12 }, (_, d) => d + 4).map((d) => <option key={d} value={d}>{d}s</option>)}</select></label>
                 </div>
+                <label>Lighting detail (optional)<input value={s.lighting_detail ?? ""} maxLength={200}
+                  onChange={(e) => setShot(i, { lighting_detail: e.target.value })} /></label>
                 <label>Sound<input value={s.audio ?? ""} onChange={(e) => setShot(i, { audio: e.target.value })} /></label>
               </div>
             ) : (
@@ -104,6 +106,7 @@ export default function PlanPanel({ projectId, presets, onApproved, onOpenShot, 
                 {s.intention && <><dt>Intention</dt><dd>{s.intention}</dd></>}
                 {s.action && <><dt>Action</dt><dd>{s.action}</dd></>}
                 <dt>Camera</dt><dd>{s.framing?.replace(/_/g, " ")}{s.end_framing ? ` → ${s.end_framing.replace(/_/g, " ")}` : ""} · {s.camera_move?.replace(/_/g, " ")}{s.camera_detail ? ` (${s.camera_detail})` : ""} · {s.lighting?.replace(/_/g, " ")}</dd>
+                {(s.depth_of_field || s.lighting_detail) && <><dt>Look</dt><dd>{[s.depth_of_field && `${s.depth_of_field} depth of field`, s.lighting_detail && `light: ${s.lighting_detail}`].filter(Boolean).join(" · ")}</dd></>}
                 <dt>Duration</dt><dd>{s.duration_s} s</dd>
                 {s.audio && <><dt>Sound</dt><dd>{s.audio}</dd></>}
                 <dt>Assets</dt><dd>{s.assets.map((h) => `@${h}`).join(", ") || "none"}</dd>

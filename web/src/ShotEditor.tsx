@@ -6,6 +6,7 @@ export type RevisionContext = { parentTakeId: string; parentNumber: number; note
 const TEXT = ["title", "intention", "action"] as const;
 const CONTROLS = [
   ["framing", "Framing"], ["camera_move", "Camera move"], ["lens_look", "Lens look"], ["lighting", "Lighting"],
+  ["depth_of_field", "Depth of field (optional)"],
 ] as const;
 type Draft = Record<string, string | number | null | string[]>;
 
@@ -14,6 +15,7 @@ const fromShot = (s: Shot): Draft => ({
   lens_look: s.lens_look, lighting: s.lighting, duration_s: s.duration_s, resolution: s.resolution, seed: s.seed,
   start_frame_sha: s.start_frame_sha, scene_id: s.scene_id, mode: s.mode, aspect_ratio: s.aspect_ratio,
   camera_detail: s.camera_detail ?? "", audio: s.audio ?? "", end_framing: s.end_framing,
+  depth_of_field: s.depth_of_field ?? null, lighting_detail: s.lighting_detail ?? "",
   refs: s.refs.map((r) => r.asset_version_id),
 });
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
@@ -33,7 +35,7 @@ export default function ShotEditor({ shot, presets, assets, scenes, revision, on
   const changes = Object.fromEntries(Object.entries(draft).filter(([k, v]) => !same(v, base[k])));
   const dirty = Object.keys(changes).length > 0;
   const set = (k: string, v: Draft[string]) =>
-    setDraft((d) => ({ ...d, [k]: v === "" && k !== "camera_detail" && k !== "audio" ? null : v }));
+    setDraft((d) => ({ ...d, [k]: v === "" && !["camera_detail", "audio", "lighting_detail"].includes(k) ? null : v }));
 
   // Every asset version, so a pinned older version still resolves after the asset moves on.
   const versions = useMemo(() => new Map(assets.flatMap((a) => a.versions.map((v) => [v.id, { asset: a, v }] as const))), [assets]);
@@ -190,6 +192,10 @@ export default function ShotEditor({ shot, presets, assets, scenes, revision, on
             <label>Camera detail (pace / timing, not the move itself)
               <input value={(draft.camera_detail as string) ?? ""} placeholder={draft.camera_move ? "e.g. very slow, ending on her eyes" : "choose a camera move first"}
                      disabled={!draft.camera_move} onChange={(e) => set("camera_detail", e.target.value)} /></label>
+            <label>Lighting detail (optional: source, colour, strength)
+              <input value={(draft.lighting_detail as string) ?? ""} maxLength={200}
+                     placeholder="e.g. warm amber streetlight from the right; soft, steady phone glow"
+                     onChange={(e) => set("lighting_detail", e.target.value)} /></label>
             <label>Sound
               <input value={(draft.audio as string) ?? ""} placeholder="e.g. rain on cobbles, distant traffic, no music"
                      onChange={(e) => set("audio", e.target.value)} /></label>
@@ -218,7 +224,8 @@ export default function ShotEditor({ shot, presets, assets, scenes, revision, on
               <ul>{shot.direction_warnings.map((w) => <li key={w.code}>{w.message}</li>)}</ul>
             </div>
           )}
-          <p className="hint">Framing, camera, lens and lighting become prompt descriptors. They are not calibrated camera or lighting controls.
+          <p className="hint">Framing, camera, lens, depth of field and lighting become prompt descriptors. They are not calibrated camera, lens or lighting controls.
+            Truck = the camera slides sideways (parallax); pan = it turns in place; tracking = it follows a moving subject.
             Timed beats go in Action (“0–2s: …”) and must fit the duration.</p>
           <div className="actions">
             <button className="ghost" disabled={!dirty || busy} onClick={save}>Save</button>

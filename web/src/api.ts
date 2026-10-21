@@ -20,6 +20,7 @@ export type Shot = {
   selected_take_id: string | null; proposals: Proposal[]; takes: Take[];
   scene_id: string | null; mode: "first_frame" | "reference"; aspect_ratio: string;
   camera_detail: string; audio: string; locked: number; end_framing: string | null;
+  depth_of_field: string | null; lighting_detail: string;
   refs: { asset_version_id: string }[]; refs_resolved: RefResolved[];
   revisions: { revision: number; author: string; at: string }[];
   direction_warnings: { level: string; code: string; message: string }[];
@@ -81,7 +82,8 @@ export type Accounting = {
 
 export type PlanShot = { key: string; title: string; intention?: string; action?: string; framing?: string | null;
   end_framing?: string | null; camera_move?: string | null; camera_detail?: string; lighting?: string | null;
-  lens_look?: string | null; duration_s: number; audio?: string; aspect_ratio?: string; assets: string[] };
+  lens_look?: string | null; depth_of_field?: string | null; lighting_detail?: string; duration_s: number; audio?: string;
+  aspect_ratio?: string; assets: string[] };
 export type PlanAsset = { handle: string; kind: string; name: string; description: string; source: string;
   required: boolean; image_prompt: string };
 export type PlanContent = { title: string; logline: string; treatment: string; observed: string[];

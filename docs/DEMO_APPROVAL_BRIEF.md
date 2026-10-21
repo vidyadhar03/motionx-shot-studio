@@ -166,3 +166,21 @@ Run in a separate rehearsal folder with the replay mock. Your real image was imp
 6. **First video:** the mock agent proposed s1 → **pending** (~135.78 credits) with Image 1 = @boy, Image 2 = @underpass. Not approved; no take.
 
 The compiled s1 prompt contains night lighting and no provenance text, so the "AI-generated" note never reaches the model.
+
+## Proposed follow-up after M7 (not run; needs your approval)
+
+**One Gemini `gemini-3.8-flash` session.** Proposed caps:
+- at most 8 new model requests and $0.10 new estimate-based spend (cumulative in `data-flyover-live`: 19 requests / $0.152907);
+- `MAX_OUTPUT_TOKENS` 4096, thinking `low`;
+- no retries, fallback or cap increases;
+- image and video caps stay 0.
+
+The last revision session used 5 requests ($0.019766).
+
+**Exact request** (shot `sht_d421039b6c2640fd`, currently revision 7, sent to a new thread):
+
+> Revise shot sht_d421039b6c2640fd (s1, 'The Flyover Bed') to use the new controls, then propose one new take linked to take 1. First read /skills/shot-direction, the shot, and take 1 with my feedback. Change only how the camera and lighting are expressed: set camera_move to truck_right (a sideways translation, not tracking) and rewrite camera_detail so it describes only how the truck behaves — slow and short, keeping the squatting boy in frame, with gentle parallax — without naming any other move. Move the light description out of action into lighting_detail: warm amber streetlight, and soft, steady phone light on his face with no bright blue flashing. Keep the approved action otherwise as it is: the vertically held phone, the single deliberate upward thumb swipe at 2 seconds with his gaze down, and one auto-rickshaw passing on the background road clear of the planting bed. Do not set depth_of_field. Keep the references (@boy v2, @underpass v2), framing, lighting preset, sound, 5 seconds, 768P, 16:9 and the locked seed unchanged. Make one write with expected_revision 7, then propose_generation with parent_take_id set to take 1. Don't approve or submit anything. In your reply, separate my feedback from what you inspected, and list any direction warnings.
+
+**Expected effect.** The pending proposal `prp_c03a880b0da24a7a` (still fresh after M7) becomes `stale` and is kept, and a new pending proposal (≈ 135.78 credits) replaces it.
+
+**Your choice:** whether to also restore the placement wording that revision 7 dropped ("just right of the belongings, in front of the large pillar"). It isn't in the request above, because you asked to keep the approved action.
