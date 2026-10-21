@@ -17,3 +17,4 @@ demo/flyover/underpass.*
 demo/flyover/underpass_*
 demo/flyover/boy_*
 demo/flyover/s1_*
+demo/flyover/s[0-9]_*
