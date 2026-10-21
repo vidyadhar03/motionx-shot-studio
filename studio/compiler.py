@@ -55,6 +55,22 @@ END_FRAMING = {
 FRAMING_ORDER = {k: i for i, k in enumerate(("extreme_wide", "wide", "medium", "medium_close", "close_up", "insert"))}
 
 
+def camera_carries_end(framing: str, end: str, move: str | None) -> bool:
+    """True when the camera move itself plausibly produces the framing change (push in -> tighter,
+    pull out -> wider, or a travelling move). Otherwise the change must come from the subject."""
+    if move in ("tracking", "handheld", "arc"):
+        return True
+    tighter = FRAMING_ORDER[end] > FRAMING_ORDER[framing]
+    return (move == "push_in" and tighter) or (move == "pull_out" and not tighter)
+
+
+def end_framing_phrase(framing: str, end: str, move: str | None) -> str:
+    # The first wording is unchanged since M4, so earlier prompts stay reproducible.
+    if camera_carries_end(framing, end, move):
+        return f"The move carries the frame to {END_FRAMING[end]} by the end of the shot."
+    return f"By the end of the shot the subject's movement brings the framing to {END_FRAMING[end]}."
+
+
 def compile_prompt(project: dict[str, Any], shot: dict[str, Any], refs: list[dict[str, Any]] | None = None) -> str:
     parts: list[str] = []
     if shot.get("intention"):
@@ -74,7 +90,7 @@ def compile_prompt(project: dict[str, Any], shot: dict[str, Any], refs: list[dic
             parts.append(phrase)
             end = shot.get("end_framing")
             if control == "framing" and end and end != key:
-                parts.append(f"The move carries the frame to {END_FRAMING[end]} by the end of the shot.")
+                parts.append(end_framing_phrase(key, end, shot.get("camera_move")))
     direction = project.get("direction") or {}
     style = [direction.get(k, "").strip() for k in ("tone", "era", "palette", "notes")]
     style = [s for s in style if s]
@@ -152,24 +168,15 @@ def direction_issues(shot: dict[str, Any]) -> list[dict[str, str]]:
     framing, end, move = shot.get("framing"), shot.get("end_framing"), shot.get("camera_move")
     if end:
         if not framing:
-            err("end_without_start", "end_framing describes where a move ends: set the starting framing first")
+            err("end_without_start", "end_framing describes where the shot ends: set the starting framing first")
         elif end == framing:
-            warn("end_same_as_start", f"end_framing equals framing ({end}), so it adds nothing to the prompt; "
-                                      "clear it for a shot that keeps its size")
-        elif move == "static" or not move:
-            err("end_without_move", f"the frame can't go from {framing} to {end} without camera movement; choose "
-                                    "push_in (tighter) or pull_out (wider), or clear end_framing")
-        else:
-            tighter = FRAMING_ORDER[end] > FRAMING_ORDER[framing]
-            if move == "push_in" and not tighter:
-                err("push_ends_wider", f"a push_in ends tighter than it starts, but {end} is wider than {framing}; "
-                                       "use pull_out or swap the framings")
-            elif move == "pull_out" and tighter:
-                err("pull_ends_tighter", f"a pull_out ends wider than it starts, but {end} is tighter than "
-                                         f"{framing}; use push_in or swap the framings")
-            elif move not in SIZE_CHANGING_MOVES:
-                warn("end_needs_size_change", f"{move} usually keeps the shot size; a {framing} -> {end} change "
-                                              "is clearer as push_in or pull_out. The model may ignore one of them")
+            warn("end_same_as_start", f"end_framing equals framing ({end}); a move can stay within one framing "
+                                      "size, so this adds nothing to the prompt. Clear it unless you want it explicit")
+        elif not camera_carries_end(framing, end, move):
+            what = "a static camera" if move in (None, "static") else f"{move}"
+            warn("end_from_subject", f"{what} doesn't itself take the frame from {framing} to {end}, so the prompt "
+                                     "says the subject's movement does; describe that movement in action (e.g. she "
+                                     "walks toward camera), or choose push_in/pull_out if the camera should do it")
     if detail:
         if not move:
             err("detail_without_move", "camera_detail qualifies the camera move and is dropped from the prompt "

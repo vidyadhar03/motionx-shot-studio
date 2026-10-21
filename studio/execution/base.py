@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-Mode = Literal["first_frame", "reference"]
+Mode = Literal["first_frame", "reference", "image"]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "canceled", "expired", "lost"]
 TERMINAL = frozenset({"succeeded", "failed", "canceled", "expired", "lost"})
 
@@ -80,6 +80,68 @@ class RenderRequest:
             return None if x is None else ImageInput(**{**x, "path": Path(x["path"])})
         return cls(**{**d, "start_frame": img(d.get("start_frame")),
                       "references": tuple(img(r) for r in d.get("references", ()))})  # type: ignore[misc]
+
+
+@dataclass(frozen=True)
+class ImageRequest:
+    """One still image for an asset (M6). Same submit/poll/download path as a video request."""
+    workflow_id: str
+    prompt: str
+    size_preset: str
+    seed: int
+    references: tuple[ImageInput, ...] = ()     # prompt order: references[0] is "image 1"
+    start_frame: None = None                     # never: lets adapters share the upload code
+    mode: str = "image"
+
+    def to_json(self) -> dict[str, Any]:
+        d = asdict(self)
+        for img in d["references"]:
+            img["path"] = str(img["path"])
+        return d
+
+    @classmethod
+    def from_json(cls, d: dict[str, Any]) -> "ImageRequest":
+        return cls(**{**{k: v for k, v in d.items() if k not in ("start_frame", "mode")},
+                      "references": tuple(ImageInput(**{**r, "path": Path(r["path"])}) for r in d.get("references", ()))})
+
+
+def request_from_json(d: dict[str, Any]) -> "RenderRequest | ImageRequest":
+    return ImageRequest.from_json(d) if d.get("mode") == "image" else RenderRequest.from_json(d)
+
+
+@dataclass(frozen=True)
+class ImageCapabilities:
+    reference_images: int
+    reference_images_min: int
+    reference_aspect_min: float
+    reference_aspect_max: float
+    image_min_side_px: int
+    image_mime_types: frozenset[str]
+    size_presets: dict[str, tuple[int, int]]
+    seed_max: int
+    max_prompt_chars: int
+
+    def validate(self, req: ImageRequest) -> None:
+        if not req.prompt.strip():
+            raise UnsupportedRequest("the image prompt is empty")
+        if len(req.prompt) > self.max_prompt_chars:
+            raise UnsupportedRequest(f"the prompt is {len(req.prompt)} characters; this app's limit is "
+                                     f"{self.max_prompt_chars}")
+        if req.size_preset not in self.size_presets:
+            raise UnsupportedRequest(f"size {req.size_preset!r} is not offered; use one of {', '.join(self.size_presets)}")
+        if not (0 <= req.seed <= self.seed_max):
+            raise UnsupportedRequest(f"seed must be between 0 and {self.seed_max}")
+        if not (self.reference_images_min <= len(req.references) <= self.reference_images):
+            raise UnsupportedRequest(f"{len(req.references)} reference images given; {req.workflow_id} accepts "
+                                     f"{self.reference_images_min}-{self.reference_images}")
+        for i, im in enumerate(req.references, 1):
+            if im.mime not in self.image_mime_types:
+                raise UnsupportedRequest(f"reference {i} is {im.mime}; accepted: {', '.join(sorted(self.image_mime_types))}")
+            if min(im.width, im.height) < self.image_min_side_px:
+                raise UnsupportedRequest(f"reference {i} is {im.width}×{im.height}px; each side must be at least "
+                                         f"{self.image_min_side_px}px")
+            if not (self.reference_aspect_min <= im.width / im.height <= self.reference_aspect_max):
+                raise UnsupportedRequest(f"reference {i} aspect ratio is outside 1:16–16:1")
 
 
 @dataclass(frozen=True)
@@ -154,7 +216,7 @@ class Manifest:
     mode: Mode
     workflow_path: Path
     raw: dict[str, Any] = field(repr=False)
-    capabilities: Capabilities = field(repr=False)
+    capabilities: Any = field(repr=False)       # Capabilities (video) | ImageCapabilities (image)
 
     @property
     def bindings(self) -> dict[str, dict[str, str]]:
@@ -172,6 +234,10 @@ class Manifest:
             usd += (n_images - extra["threshold"]) * extra["usd"]
         return round(usd * p["credits_per_usd"], 2)
 
+    def credits_estimate_image(self, n_images: int = 1) -> float:
+        p = self.raw["pricing"]
+        return round(n_images * p["usd_per_image"] * p["credits_per_usd"], 2)
+
     def workflow_graph(self) -> dict[str, Any]:
         return json.loads(self.workflow_path.read_text())
 
@@ -179,6 +245,15 @@ class Manifest:
     def load(cls, workflows_dir: Path, workflow_id: str) -> "Manifest":
         raw = json.loads((workflows_dir / f"{workflow_id}.manifest.json").read_text())
         c = raw["capabilities"]
+        if raw["mode"] == "image":
+            icaps = ImageCapabilities(
+                reference_images=int(c["reference_images"]), reference_images_min=int(c["reference_images_min"]),
+                reference_aspect_min=float(c["reference_aspect_min"]), reference_aspect_max=float(c["reference_aspect_max"]),
+                image_min_side_px=int(c["image_min_side_px"]), image_mime_types=frozenset(c["image_mime_types"]),
+                size_presets={k: tuple(v) for k, v in c["size_presets"].items()}, seed_max=int(c["seed"]["max"]),
+                max_prompt_chars=int(c["max_prompt_chars"]))
+            return cls(id=raw["id"], version=int(raw["version"]), mode=raw["mode"],
+                       workflow_path=workflows_dir / raw["workflow_file"], raw=raw, capabilities=icaps)
         caps = Capabilities(
             start_frame="required" if c["start_frame"] == "required" else
                         ("not_supported" if str(c["start_frame"]).startswith("not") else "optional"),

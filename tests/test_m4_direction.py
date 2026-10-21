@@ -24,9 +24,6 @@ def test_wide_to_close_up_push_is_valid_and_explicit(world: World):
 
 
 @pytest.mark.parametrize("fields,needle", [
-    ({"framing": "close_up", "end_framing": "wide", "camera_move": "push_in"}, "push_in ends tighter"),
-    ({"framing": "wide", "end_framing": "close_up", "camera_move": "pull_out"}, "pull_out ends wider"),
-    ({"framing": "wide", "end_framing": "close_up", "camera_move": "static"}, "without camera movement"),
     ({"framing": None, "end_framing": "close_up", "camera_move": "push_in"}, "set the starting framing"),
     ({"camera_move": None, "end_framing": None, "camera_detail": "very slow"}, "choose camera_move first"),
     ({"action": "0-3s: she waits; 3-7s: she turns"}, "refers to 7s"),
@@ -43,7 +40,11 @@ def test_impossible_direction_is_refused_with_guidance(world: World, fields, nee
     ({"camera_detail": "very slow, drifting slightly left as she turns"}, None),
     ({"camera_detail": "slow, with a slight pan to follow her glance"}, "detail_mentions_other_move"),
     ({"framing": "wide", "end_framing": "wide"}, "end_same_as_start"),
-    ({"framing": "wide", "end_framing": "close_up", "camera_move": "pan_left"}, "end_needs_size_change"),
+    ({"framing": "wide", "end_framing": "close_up", "camera_move": "pan_left"}, "end_from_subject"),
+    ({"framing": "wide", "end_framing": "close_up", "camera_move": "static"}, "end_from_subject"),
+    ({"framing": "close_up", "end_framing": "wide", "camera_move": "push_in"}, "end_from_subject"),
+    ({"framing": "wide", "end_framing": "close_up", "camera_move": "pull_out"}, "end_from_subject"),
+    ({"camera_detail": "very slow, stays a wide shot throughout"}, None),     # a push-in need not change size
 ])
 def test_redundant_or_ambiguous_direction_is_accepted_with_a_warning(world: World, fields, code):
     shot = world.shot()
@@ -70,12 +71,21 @@ def test_live_run_detail_is_accepted_and_the_agent_sees_the_warning(world: World
     assert any("end_framing" in w for w in out.content["warnings"])
 
 
-def test_impossible_direction_is_still_an_error_for_the_agent(world: World):
+def test_invalid_direction_is_still_an_error_for_the_agent(world: World):
     shot = world.shot()
     out = AgentTools(shot["project_id"], world.ops, world.service, world.media).execute(
-        ToolCall("w", "write", {"path": f"/shots/{shot['id']}", "patch": {"end_framing": "extreme_wide"},
+        ToolCall("w", "write", {"path": f"/shots/{shot['id']}", "patch": {"framing": None, "end_framing": "medium"},
                                 "expected_revision": 1}))
-    assert out.is_error and "push_in ends tighter" in out.content["message"]
+    assert out.is_error and "set the starting framing" in out.content["message"]
+
+
+def test_static_camera_with_moving_subject_compiles_to_subject_wording(world: World):
+    shot = world.shot(framing="wide", end_framing="medium", camera_move="static",
+                      action="She walks toward the camera and stops")
+    assert [w["code"] for w in world.ops.get_shot(shot["id"])["direction_warnings"]] == ["end_from_subject"]
+    p = compile_prompt(world.ops.get_project(shot["project_id"]), world.ops.get_shot_row(shot["id"]))
+    assert "By the end of the shot the subject's movement brings the framing to a medium shot (waist up)." in p
+    assert "The move carries" not in p
 
 
 def test_duration_change_reports_cost_impact_to_the_agent(world: World):

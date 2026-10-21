@@ -5,7 +5,7 @@
                                            # the node makes an unauthenticated request that api.comfy.org
                                            # rejects with 401 ("Unauthorized"); no account, nothing billed
   python scripts/comfy_check.py balance    # read-only credit balance for COMFY_API_KEY (from .env)
-  python scripts/comfy_check.py graphs     # OFFLINE: build the adapter's real graphs (first frame; 1, 3, 9
+  python scripts/comfy_check.py graphs     # OFFLINE: build the adapter's real graphs (first frame; 1, 3, 9 refs; image 0/2/10
                                            # references) and validate them with ComfyUI's validate_prompt.
                                            # Executes nothing, no network, no key.
 
@@ -64,7 +64,7 @@ def balance(s: Settings) -> None:
 
 def graphs(s: Settings) -> None:
     import json, shutil, subprocess, tempfile
-    from studio.execution.base import ImageInput as I
+    from studio.execution.base import ImageInput as I, ImageRequest
     a = ComfyLocalAdapter(s.comfy_base_url, None, s.workflows_dir, s.comfyui_url)
     frame = ROOT / "samples" / "frame_cc0.png"
     inp = ROOT / "runtime" / "ComfyUI" / "input"
@@ -74,6 +74,8 @@ def graphs(s: Settings) -> None:
         "first_frame": RenderRequest("h3_first_frame", "first_frame", "check", 5, "768P", 1, start_frame=ref),
         **{f"reference_x{n}": RenderRequest("h3_reference", "reference", "check", 5, "768P", 1,
                                              references=tuple([ref] * n), aspect_ratio="16:9") for n in (1, 3, 9)},
+        **{f"image_refs_x{n}": ImageRequest("seedream_flash_image", "check", "(1K) 1424x800 (16:9)", 1,
+                                             references=tuple([ref] * n)) for n in (0, 2, 10)},
     }
     with tempfile.TemporaryDirectory() as d:
         files = []

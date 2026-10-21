@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, Asset, media, Presets, Revision, Scene, Shot } from "./api";
+import { api, Asset, currentVersion, media, Presets, Revision, Scene, Shot } from "./api";
 
 export type RevisionContext = { parentTakeId: string; parentNumber: number; note: string };
 
@@ -68,7 +68,8 @@ export default function ShotEditor({ shot, presets, assets, scenes, revision, on
 
   const addRef = (assetId: string) => {
     const a = assets.find((x) => x.id === assetId);
-    if (a) set("refs", [...refs, a.versions[0].id]);          // pins the asset's current version
+    const cur = a && currentVersion(a);
+    if (cur) set("refs", [...refs, cur.id]);                  // pins the asset's chosen (current) version
   };
   const move = (i: number, d: number) => {
     const next = [...refs]; const [x] = next.splice(i, 1); next.splice(i + d, 0, x); set("refs", next);
@@ -139,7 +140,7 @@ export default function ShotEditor({ shot, presets, assets, scenes, revision, on
                   <img src={media(v.media_sha)} alt="" />
                   <div className="ref-text"><strong>@{asset.handle}</strong> <span className="muted">{asset.kind} · v{v.version}</span>
                     <div className="muted clip1">{v.description}</div>
-                    {newer && <button className="small badge-btn" onClick={() => set("refs", refs.map((x) => x === id ? asset.versions[0].id : x))}>
+                    {newer && <button className="small badge-btn" onClick={() => set("refs", refs.map((x) => x === id ? (currentVersion(asset)?.id ?? x) : x))}>
                       v{asset.current_version} available → use it</button>}
                   </div>
                   <div className="ref-actions">
@@ -152,7 +153,7 @@ export default function ShotEditor({ shot, presets, assets, scenes, revision, on
             })}
             <select value="" onChange={(e) => e.target.value && addRef(e.target.value)} disabled={refs.length >= presets.reference.max_images}>
               <option value="">+ Add reference ({refs.length}/{presets.reference.max_images})</option>
-              {assets.filter((a) => !usedAssets.has(a.id)).map((a) => <option key={a.id} value={a.id}>@{a.handle} · {a.kind} · v{a.current_version}</option>)}
+              {assets.filter((a) => !usedAssets.has(a.id) && a.current_version > 0).map((a) => <option key={a.id} value={a.id}>@{a.handle} · {a.kind} · v{a.current_version}</option>)}
             </select>
             {!assets.length && <p className="muted">Create assets in the sidebar first.</p>}
           </div>

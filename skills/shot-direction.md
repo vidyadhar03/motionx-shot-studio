@@ -29,12 +29,12 @@ calibrated controls. Describe the picture plainly and expect to iterate.
 | Aspect | Field | Notes |
 |---|---|---|
 | Size the shot **starts** at | `framing` | Always set it |
-| Size the move **reaches** | `end_framing` | Only for a move that changes size. `push_in` must end tighter, `pull_out` wider. `static`, pans and tilts keep their size. Leave it empty when the size doesn't change |
+| Size the shot **reaches** | `end_framing` | Only when the size changes. A push-in or pull-out does it with the camera; with a static camera, pan or tilt the subject's movement must do it (describe it in `action`; the app warns). A push-in may stay within one size: then leave it empty |
 | Which move | `camera_move` | One preset |
 | How the move **behaves** | `camera_detail` | Pace, timing and what it settles on. Don't restate the move ("slow push in" when `camera_move=push_in` says it twice; the app warns) |
 | How long it lasts | `duration_s` (4–15) | Changes cost. The write result reports the estimate before and after |
 
-A wide shot that pushes into a close-up is valid and common. Express it as `framing=wide`, `end_framing=close_up`, `camera_move=push_in`. If `camera_detail` says "ending on her eyes" while `end_framing` is empty, the app accepts it with a warning: set `end_framing` so the start and end sizes are explicit. A push_in that ends wider, a pull_out that ends tighter, or an `end_framing` on a static shot is impossible and refused.
+A wide shot that pushes into a close-up is valid and common. Express it as `framing=wide`, `end_framing=close_up`, `camera_move=push_in`. If `camera_detail` says "ending on her eyes" while `end_framing` is empty, the app accepts it with a warning: set `end_framing` so the start and end sizes are explicit. An `end_framing` without a starting `framing` is refused. Combinations where the camera doesn't produce the size change (static, pan, push-in ending wider) are accepted with a warning, and the prompt says the subject's movement brings the framing there.
 
 ### "Too fast" has three remedies; pick one coherent combination
 

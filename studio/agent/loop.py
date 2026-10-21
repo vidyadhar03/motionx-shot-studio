@@ -28,9 +28,10 @@ class AgentBudgetError(RuntimeError):
 
 SYSTEM_RULES = """You are the MotionX Shot Studio directing assistant, working inside ONE film project.
 Project state lives in tools, not in this conversation: read before you write, and never invent what you can read.
-Tools: list, read, write, propose_generation. You can edit DRAFT shots and create scenes. You can only PROPOSE
-generations; a person approves, submits, reviews and selects. You cannot change assets, decisions, budgets or
-locked shots. Load /skills/shot-direction before revising a shot; it maps review notes to shot fields.
+Tools: list, read, write, propose_generation. You can draft the film plan (/plan), edit DRAFT shots and create
+scenes. You can only PROPOSE generations (video takes and asset images); a person approves plans and generations,
+chooses generated asset versions, reviews and selects. You cannot change assets, decisions, budgets or locked
+shots. Load /skills/film-planning before drafting a plan and /skills/shot-direction before revising a shot.
 Every write needs the shot's current revision; if a write is refused, read again and adjust. If a tool refusal or
 limit changed your plan, say so plainly. Finish by telling the person what you changed and what awaits approval."""
 
@@ -47,6 +48,9 @@ def make_provider(settings: Settings, provider: str, model: str | None) -> Provi
     if provider == "scripted":
         from .providers.scripted import ScriptedProvider
         return ScriptedProvider()
+    if provider == "replay":
+        from .providers.replay import ReplayProvider
+        return ReplayProvider(settings.agent_replay_file)
     if provider == "gemini":
         from .providers.gemini import GeminiProvider
         return GeminiProvider(model=model or None, api_key=settings.gemini_api_key,
@@ -55,7 +59,7 @@ def make_provider(settings: Settings, provider: str, model: str | None) -> Provi
     if provider == "anthropic":
         from .providers.anthropic_provider import AnthropicProvider
         return AnthropicProvider(model=model or None, api_key=settings.anthropic_api_key, effort=settings.agent_thinking)
-    raise ProviderConfigError(f"unknown agent provider {provider!r}; use scripted, gemini or anthropic")
+    raise ProviderConfigError(f"unknown agent provider {provider!r}; use scripted, replay, gemini or anthropic")
 
 
 class AgentRunner:
@@ -67,7 +71,7 @@ class AgentRunner:
     def default_model(self, provider: str) -> str:
         if self.settings.agent_model:
             return self.settings.agent_model
-        return {"scripted": "scripted-revise-v1", "gemini": "gemini-3.8-flash", "anthropic": "claude-opus-5-5"}.get(
+        return {"scripted": "scripted-revise-v1", "replay": "replay-mock", "gemini": "gemini-3.8-flash", "anthropic": "claude-opus-5-5"}.get(
             provider, "")
 
     def create_thread(self, project_id: str, provider: str | None = None, model: str | None = None) -> dict:
@@ -79,7 +83,8 @@ class AgentRunner:
         p = self.ops.get_project(project_id)
         assets = ", ".join(f"@{a['handle']} v{a['current_version']} ({a['kind']})" for a in self.ops.list_assets(project_id))
         return (f"{SYSTEM_RULES}\n\nProject: {p['name']}\nBrief: {p['brief'][:400]}\nDirection: {p['direction']}\n"
-                f"Assets: {assets or 'none'}\nSkills: /skills/shot-direction (shot grammar, how notes map to fields)\n"
+                f"Assets: {assets or 'none'}\nSkills: /skills/film-planning (idea -> plan -> assets), "
+                f"/skills/shot-direction (shot grammar, how notes map to fields)\n"
                 f"Focus shot: {focus_shot_id or 'none'}")
 
     # -- one user message ---------------------------------------------------------------------

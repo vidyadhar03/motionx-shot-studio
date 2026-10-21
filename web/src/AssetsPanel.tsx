@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, Asset, media } from "./api";
+import { api, Asset, currentVersion, media } from "./api";
 
 const KINDS = ["character", "location", "prop"] as const;
 
@@ -22,9 +22,9 @@ export default function AssetsPanel({ projectId, assets, onChanged, onError }: {
             {list.map((a) => (
               <div key={a.id} className="asset">
                 <div className="asset-row" onClick={() => setOpen(open === a.id ? null : a.id)}>
-                  <img src={media(a.versions[0].media_sha)} alt="" />
-                  <div><strong>@{a.handle}</strong> <span className="muted">{a.name} · v{a.current_version}</span>
-                    <div className="muted clip1">{a.versions[0].description}</div></div>
+                  <img src={media((currentVersion(a) ?? a.versions[0]).media_sha)} alt="" />
+                  <div><strong>@{a.handle}</strong> <span className="muted">{a.name} · {a.current_version ? `v${a.current_version}` : "no version chosen"}</span>
+                    <div className="muted clip1">{(currentVersion(a) ?? a.versions[0]).description}</div></div>
                 </div>
                 {open === a.id && <VersionForm asset={a} onDone={onChanged} onError={onError} />}
               </div>
@@ -70,7 +70,7 @@ function AssetForm({ projectId, onDone, onError }: { projectId: string; onDone: 
 }
 
 function VersionForm({ asset, onDone, onError }: { asset: Asset; onDone: () => void; onError: (e: unknown) => void }) {
-  const cur = asset.versions[0];
+  const cur = currentVersion(asset) ?? asset.versions[0];
   const [description, setDescription] = useState(cur.description);
   const [sha, setSha] = useState<string | null>(null);
   const changed = description !== cur.description || !!sha;
@@ -78,14 +78,15 @@ function VersionForm({ asset, onDone, onError }: { asset: Asset; onDone: () => v
     <div className="form version-form">
       <div className="versions">
         {asset.versions.map((v) => (
-          <figure key={v.id} title={v.description}><img src={media(v.media_sha)} alt="" /><figcaption>v{v.version}</figcaption></figure>
+          <figure key={v.id} title={v.description}><img src={media(v.media_sha)} alt="" />
+            <figcaption>v{v.version}{v.origin === "generated" ? ` · gen · ${v.review}` : ""}{v.version === asset.current_version ? " · current" : ""}</figcaption></figure>
         ))}
       </div>
       <label>Description<textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} /></label>
       <ImagePick sha={sha} onSha={setSha} onError={onError} />
       <button className="small" disabled={!changed}
               onClick={() => api.addVersion(asset.id, { description, media_sha: sha ?? undefined }).then(() => { setSha(null); onDone(); }).catch(onError)}>
-        Save as v{asset.current_version + 1}
+        Save as v{asset.versions[0].version + 1}
       </button>
       <p className="hint">Earlier versions and the takes made from them never change. Shots keep their pinned version until you update them.</p>
     </div>

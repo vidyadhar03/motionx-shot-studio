@@ -21,15 +21,16 @@ from .providers.base import ToolCall, ToolOutcome, ToolSpec
 SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
 TOOL_NAMES = ("list", "read", "write", "propose_generation")
 
-LIST_PATHS = "/, /decisions, /assets, /assets/{handle}, /scenes, /shots, /shots/{id}/takes, /shots/{id}/proposals, /skills"
-READ_PATHS = ("/, /decisions, /assets/{handle}, /assets/{handle}/v{n}, /scenes/{id}, /shots/{id}, "
+LIST_PATHS = "/, /plan/revisions, /decisions, /assets, /assets/{handle}, /scenes, /shots, /shots/{id}/takes, /shots/{id}/proposals, /skills"
+READ_PATHS = ("/, /plan, /plan/revisions/{n}, /preparation, /image-workflow, /decisions, /assets/{handle}, /assets/{handle}/v{n}, /scenes/{id}, /shots/{id}, "
               "/shots/{id}/start_frame, /shots/{id}/takes/{n}, /shots/{id}/proposals/{proposal_id}, /skills/{name}")
-WRITE_PATHS = "/shots/{id} (update a draft shot; needs expected_revision), /shots (create), /scenes (create)"
+WRITE_PATHS = ("/plan (the whole film plan as patch; needs expected_revision once a plan exists), "
+               "/shots/{id} (update a draft shot; needs expected_revision), /shots (create), /scenes (create)")
 
 _STR = {"type": "string"}
 PATCH_SCHEMA = {
     "type": "object",
-    "description": "Only the fields to change. For /scenes give {name}.",
+    "description": "Shots: only the fields to change. /scenes: {name}. /plan: the whole plan.",
     "properties": {
         "title": _STR, "intention": _STR, "action": {"type": "string", "description": "What we see; timed beats like '0-2s: ...' must fit duration_s."},
         "framing": {"type": "string", "enum": list(PRESETS["framing"]), "description": "Starting framing."},
@@ -43,6 +44,19 @@ PATCH_SCHEMA = {
         "duration_s": {"type": "integer", "minimum": 4, "maximum": 15},
         "mode": {"type": "string", "enum": ["first_frame", "reference"]},
         "aspect_ratio": _STR, "scene_id": _STR, "name": _STR,
+        # /plan (the whole plan each time; see /skills/film-planning)
+        "logline": _STR, "treatment": _STR,
+        "observed": {"type": "array", "items": _STR, "description": "Plan: only what the person reports seeing."},
+        "creative_additions": {"type": "array", "items": _STR, "description": "Plan: everything you add."},
+        "guardrails": {"type": "array", "items": _STR},
+        "scene": {"type": "object", "properties": {"name": _STR}},
+        "shots": {"type": "array", "description": "Plan: about three shots.", "items": {"type": "object", "properties": {
+            "key": _STR, "title": _STR, "intention": _STR, "action": _STR, "framing": _STR, "end_framing": _STR,
+            "camera_move": _STR, "camera_detail": _STR, "lighting": _STR, "lens_look": _STR,
+            "duration_s": {"type": "integer"}, "audio": _STR, "assets": {"type": "array", "items": _STR}}}},
+        "assets": {"type": "array", "description": "Plan: assets the shots need.", "items": {"type": "object", "properties": {
+            "handle": _STR, "kind": _STR, "name": _STR, "description": _STR, "source": _STR,
+            "required": {"type": "boolean"}, "image_prompt": _STR}}},
         "refs": {"type": "array", "description": "Ordered references (Image 1..N), pinned to asset versions.",
                  "items": {"type": "object", "properties": {"asset_version_id": _STR}, "required": ["asset_version_id"]}},
     },
@@ -60,12 +74,19 @@ SPECS = [
                  "patch": PATCH_SCHEMA,
                  "expected_revision": {"type": "integer", "description": "Required when updating a shot."}},
               "required": ["path", "patch"]}),
-    ToolSpec("propose_generation", "Create a PENDING generation proposal for a shot. A person must approve it; "
-             "you cannot approve or submit. Returns the compiled prompt and cost estimate, or why it is invalid.",
+    ToolSpec("propose_generation", "Create a PENDING proposal: a video take for a shot (shot_id), or an image for a "
+             "planned asset (asset + prompt). A person must approve it; you cannot approve or submit. Returns the "
+             "compiled prompt/settings and cost estimate, or why it is invalid.",
              {"type": "object", "properties": {
-                 "shot_id": {"type": "string"}, "note": {"type": "string"},
-                 "parent_take_id": {"type": "string", "description": "The take this revises, if any."}},
-              "required": ["shot_id", "note"]}),
+                 "shot_id": {"type": "string", "description": "Video: the shot to generate."},
+                 "parent_take_id": {"type": "string", "description": "Video: the take this revises, if any."},
+                 "asset": {"type": "string", "description": "Image: handle of a planned asset, e.g. boy."},
+                 "prompt": {"type": "string", "description": "Image: the exact image prompt."},
+                 "references": {"type": "array", "items": {"type": "string"},
+                                "description": "Image: optional input images as 'handle/vN' (current versions only)."},
+                 "size_preset": {"type": "string", "description": "Image: one of read /image-workflow size_presets."},
+                 "note": {"type": "string"}},
+              "required": ["note"]}),
 ]
 
 _SHOT_KEYS = ("id", "revision", "locked", "title", "scene_id", "mode", "intention", "action", "framing", "camera_move",
@@ -79,9 +100,18 @@ class ToolRefused(Exception):
 
 class AgentTools:
     def __init__(self, project_id: str, ops: Ops, service: GenerationService, media: MediaStore):
+        from ..assetgen import AssetGenerations
+        from ..planning import Planning
         self.pid, self.ops, self.service, self.media = project_id, ops, service, media
+        self.planning = Planning(ops.db, ops)
+        self.assetgen = AssetGenerations(ops.db, ops, media, service.adapter, service.settings)
         self._routes: list[tuple[str, re.Pattern, Callable[..., Any]]] = [
             ("list", re.compile(r"^/$"), self._list_root),
+            ("list", re.compile(r"^/plan/revisions$"), self._list_plan_revisions),
+            ("read", re.compile(r"^/plan$"), self._read_plan),
+            ("read", re.compile(r"^/plan/revisions/(?P<n>\d+)$"), self._read_plan_revision),
+            ("read", re.compile(r"^/preparation$"), self._read_preparation),
+            ("read", re.compile(r"^/image-workflow$"), self._read_image_workflow),
             ("list", re.compile(r"^/decisions$"), self._decisions),
             ("list", re.compile(r"^/assets$"), self._list_assets),
             ("list", re.compile(r"^/assets/(?P<handle>[\w-]+)$"), self._list_versions),
@@ -147,7 +177,42 @@ class AgentTools:
 
     # -- list -----------------------------------------------------------------------------------
     def _list_root(self) -> dict:
-        return {"children": ["/decisions", "/assets", "/scenes", "/shots", "/skills"]}
+        return {"children": ["/plan", "/preparation", "/decisions", "/assets", "/scenes", "/shots", "/skills"]}
+
+    # -- plan and preparation (M6) ------------------------------------------------------------
+    def _plan(self) -> dict:
+        plan = self.planning.get_plan(self.pid)
+        if not plan:
+            raise NotFoundError("this project has no plan yet; write /plan to propose one")
+        return plan
+
+    def _read_plan(self) -> dict:
+        p = self._plan()
+        return {"revision": p["revision"], "status": p["status"], "approved_revision": p["approved_revision"],
+                "content": p["content"], "warnings": {k: [w["message"] for w in v] for k, v in p["warnings"].items()},
+                "shots_created": {l["item_key"]: l["target_id"] for l in p["links"] if l["kind"] == "shot"}}
+
+    def _list_plan_revisions(self) -> dict:
+        return {"revisions": self._plan()["revisions"]}
+
+    def _read_plan_revision(self, n: str) -> dict:
+        return self.planning.plan_revision(self._plan()["id"], int(n))
+
+    def _read_preparation(self) -> dict:
+        prep = self.planning.preparation(self.pid)
+        return {"missing_required": prep["missing_required"], "requirements": [
+            {"handle": r["handle"], "kind": r["kind"], "status": r["status"], "source": r["source"],
+             "description": r["description"], "image_prompt": r["image_prompt"],
+             "current_version": r["current"]["version"] if r["current"] else None,
+             "generations": [{"id": g["id"], "status": g["status"], "by": g["created_by"]} for g in r["generations"]],
+             "planned_shots": [{"key": s["key"], "shot_id": s["shot_id"], "pinned_version": s["pinned_version"]}
+                               for s in r["shots"]]} for r in prep["requirements"]]}
+
+    def _read_image_workflow(self) -> dict:
+        m = self.service.adapter.manifest(self.service.settings.image_workflow)
+        return {"id": m.id, "title": m.raw["title"], "size_presets": list(m.capabilities.size_presets),
+                "max_references": m.capabilities.reference_images, "est_credits_per_image": m.credits_estimate_image(1),
+                "fixed": m.fixed}
 
     def _decisions(self) -> dict:
         return {"decisions": [{"text": d["text"], "by": d["decided_by"], "at": d["at"]}
@@ -300,6 +365,14 @@ class AgentTools:
             if after["direction_warnings"]:             # accepted, but worth a second look
                 out["warnings"] = [w["message"] for w in after["direction_warnings"]]
             return out
+        if path == "/plan":
+            plan = self.planning.write_plan(self.pid, patch, expected_revision=inp.get("expected_revision"),
+                                            author="agent", note=str(inp.get("note", ""))[:500])
+            out = {"ok": True, "plan_revision": plan["revision"], "status": plan["status"],
+                   "next": "A person reviews and approves the plan in the UI. You cannot approve it."}
+            if plan["warnings"]:
+                out["warnings"] = {k: [w["message"] for w in v] for k, v in plan["warnings"].items()}
+            return out
         if path == "/shots":
             s = self.ops.create_shot(self.pid, patch, author="agent")
             out = {"ok": True, "created": f"/shots/{s['id']}", "revision": s["revision"]}
@@ -312,6 +385,10 @@ class AgentTools:
         raise ToolRefused(f"write does not support {path!r}; allowed: {WRITE_PATHS}")
 
     def _propose(self, inp: dict) -> dict:
+        if inp.get("asset"):
+            return self._propose_asset(inp)
+        if not inp.get("shot_id"):
+            raise ToolRefused("give shot_id (video) or asset + prompt (image)")
         sid = str(inp.get("shot_id", ""))
         self._shot(sid)
         p = self.service.create_proposal(sid, created_by="agent", note=str(inp.get("note", ""))[:500],
@@ -319,6 +396,29 @@ class AgentTools:
         return {"ok": True, "proposal_id": p["id"], "status": p["status"], "workflow": p["workflow_id"],
                 "resolved_prompt": p["resolved_prompt"], "est_credits": p["est_credits"],
                 "next": "A person must review and approve this proposal in the UI. You cannot approve or submit it."}
+
+
+    def _propose_asset(self, inp: dict) -> dict:
+        if not str(inp.get("prompt", "")).strip():
+            raise ToolRefused("an image proposal needs the exact prompt")
+        refs = []
+        for r in inp.get("references") or []:
+            m = re.match(r"^@?([\w-]+)/v(\d+)$", str(r))
+            if not m:
+                raise ToolRefused(f"reference {r!r} must look like 'handle/vN'")
+            a = self._asset(m.group(1))
+            v = next((v for v in a["versions"] if v["version"] == int(m.group(2))), None)
+            if v is None or v["review"] != "chosen":
+                raise ToolRefused(f"@{a['handle']} v{m.group(2)} is not a chosen version; only chosen versions can be inputs")
+            refs.append(v["id"])
+        g = self.assetgen.create_proposal(self.pid, str(inp["asset"]), prompt=str(inp["prompt"]),
+                                          reference_version_ids=refs, size_preset=inp.get("size_preset"),
+                                          created_by="agent", note=str(inp.get("note", ""))[:500])
+        return {"ok": True, "asset_generation_id": g["id"], "status": g["status"], "asset": g["handle"],
+                "settings": {k: g["settings"][k] for k in ("workflow", "model", "size_preset")},
+                "est_credits": g["est_credits"],
+                "next": "A person must review and approve this image proposal. You cannot approve or run it, and its "
+                        "output must be chosen by a person before any shot uses it."}
 
 
 def outcome_record(o: ToolOutcome) -> dict:

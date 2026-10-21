@@ -1,6 +1,6 @@
 # MotionX Shot Studio: High-Level Design
 
-**Status:** revised 2026-10-20 for the settled local execution route. M0 and M1 are implemented (see the plan, §4). **Deadline:** Comfy "Open Source Higgsfield" submission, **October 30, 2026, 9:00 AM PT**.
+**Status:** revised 2026-10-20 for the settled local execution route; extended 2026-10-21 with idea-to-plan and asset preparation (§11). M0–M4 and M6 are implemented offline (see the plan). **Deadline:** Comfy "Open Source Higgsfield" submission, **October 30, 2026, 9:00 AM PT**.
 **Companion:** [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)
 
 Labels used below: **FACT** (verified in our code or the official docs on 2026-10-19), **DESIGN** (our proposal), **UNTESTED** (model or platform behaviour nobody has run yet).
@@ -8,6 +8,8 @@ Labels used below: **FACT** (verified in our code or the official docs on 2026-1
 ---
 
 ## 1. October scope
+
+**Positioning.** An open-source, Comfy-powered directing workspace: describe an idea, plan shots, prepare references, approve generation and revise with preserved creative decisions. These concepts are not ours alone: Higgsfield already documents AI directing, script breakdown, reusable assets and human-triggered generation. What this project offers is an open, local, inspectable implementation on Comfy workflows, with every input, approval and revision recorded.
 
 A project-based shot-making app. It runs on the user's Mac and executes workflows on a local ComfyUI, while the video model runs remotely through a Comfy Partner Node. A user (or an agent working for them) builds a shot from a starting frame and/or reference assets plus written direction. The user approves a generation proposal, the app runs a real Comfy workflow, and the result is saved as a take with its exact inputs. The user reviews it and revises, which creates a new take. Earlier takes are never altered.
 
@@ -22,12 +24,15 @@ A project-based shot-making app. It runs on the user's Mac and executes workflow
 - Takes that store the exact input snapshot, workflow and model configuration, and Comfy job details. Each take has feedback and a review status.
 - Revision by a new take, with takes compared side by side and one selected per shot.
 - Export of the selected takes plus a provenance manifest.
-- One agent loop with four tools and one filmmaking skill, working on the same state as the UI.
+- One agent loop with four tools and two skills (film planning, shot direction), working on the same state as the UI.
+- **(M6)** One short-film plan per project: treatment, observed vs creative additions, guardrails and about three shots, with revisions and explicit human approval (§11).
+- **(M6)** Asset preparation: required assets with ready/missing status; **Upload or Generate** per asset; one image workflow (Seedream 5.0 Flash) with the same proposal → approval → output pattern; generated images become asset versions that a person must choose (§11).
 
 **Explicit exclusions (October)**
 
 - No multi-agent orchestration, workflow builder/canvas, memory graph or learned skills.
-- No timeline, editing, audio mixing or assembly. Export is files plus a manifest.
+- No timeline, editing, audio mixing, film assembly or automatic editing. Export is files plus a manifest.
+- No more than one plan per project, and no new workflow builder: one image workflow and two video workflows, each a fixed graph.
 - No composing a start frame from references (image edit → video) in one run. It's a stretch goal, and §7 shows the manual workaround.
 - No reference videos or reference audio. The model accepts them, but they're excluded from the October UI.
 - No calibrated camera, lens or lighting control. Every look control becomes **prompt text** (§7.3).
@@ -38,6 +43,11 @@ A project-based shot-making app. It runs on the user's Mac and executes workflow
 ## 2. User journey
 
 ```
+(M6) Idea/brief ─► agent drafts plan (treatment · observed vs added · ~3 shots · assets)
+   └► person edits (new revisions) and approves a revision ─► scene + draft shots + asset requirements
+        └► per asset: Upload, or Generate (image proposal ─► approve ─► image ─► person chooses it)
+             └► chosen versions pinned into the planned shots ─► first video proposal (below)
+
 Create project ─► write brief + direction ─► add assets (upload ref image = v1)
    └► add scene ─► add shot: upload start frame and/or pick asset versions,
                     write intention/action, pick framing/move/look/light, 5 s 768P
@@ -177,12 +187,12 @@ The thread is bound to one project. Every path is relative to it, so another pro
 
 ### 6.3 Revision instructions → compiled prompt (no contradictions)
 
-Since M5 the checks have two levels. **Errors** are input the prompt can't honour as written (it would be dropped or state something impossible) and refuse the write. **Warnings** are legitimate but redundant or ambiguous; the write is accepted, the shot carries `direction_warnings`, the editor shows them, and the agent's `write` result lists them.
+Since M5 the checks have two levels (relaxed further in M6: framing changes the camera doesn't make are warnings, because a moving subject can make them). **Errors** are input the prompt can't honour as written (it would be dropped or state something impossible) and refuse the write. **Warnings** are legitimate but redundant or ambiguous; the write is accepted, the shot carries `direction_warnings`, the editor shows them, and the agent's `write` result lists them.
 
 | Instruction kind | Lands in | Rule enforced in code |
 |---|---|---|
 | Which move ("push in", "track") | `camera_move` preset | One preset per shot |
-| Where the move ends ("end on her eyes") | **`end_framing`** (M4), rendered as "The move carries the frame to a close-up on the face by the end of the shot." | **Refused:** no starting `framing`; `push_in` ending wider; `pull_out` ending tighter; an end with a static camera. **Warned (M5):** end equal to start; a pan/tilt changing size |
+| Where the shot ends ("end on her eyes") | **`end_framing`** (M4). Rendered as "The move carries the frame to …" when the camera produces the change (push-in tighter, pull-out wider, tracking/handheld/arc), otherwise "By the end of the shot the subject's movement brings the framing to …" (M6) | **Refused:** no starting `framing`. **Warned:** end equal to start; a change the camera doesn't make (static, pan/tilt, push-in ending wider, pull-out ending tighter): describe the subject's movement in `action`. A push-in may stay within one framing size |
 | How the move behaves ("slower", "starts after 2 s") | `camera_detail` (≤ 200 chars), rendered right after the preset phrase | **Refused:** `camera_move` empty (the detail would be dropped). **Warned (M5, refused in M4):** names a different move (a combined move may be deliberate; zoom/crane have no preset), restates its own preset, implies a tighter ending ("eyes", "close-up") on a wide/medium shot without `end_framing` |
 | Timing ("hold 2 s, then she turns") | `duration_s` (4–15) plus timed beats in `action` ("0–2s: …; 2–5s: …") | Any time mentioned in `action` or `camera_detail` must be ≤ `duration_s` |
 | "Too fast" | One coherent remedy: slower `camera_detail` pace, a shorter distance (`end_framing`), or a longer `duration_s` | The write result reports the estimate before and after any duration change, so the agent can state the cost (M4) |
@@ -409,8 +419,99 @@ Copying about 600 lines of patterns is cheaper and safer than untangling any of 
 
 | # | Decision | Default if no answer | Needed by |
 |---|---|---|---|
-| D1 | Further paid generation (e.g. the first real reference-to-video take, a real two-take revision) | none authorised; the app refuses paid approvals (1/1 used). Staged plan with caps (Stages B, D): `docs/M5_APPROVAL_BRIEF.md` | before M5 demo |
-| D2 | First live agent run: Gemini key (`GEMINI_API_KEY`), model, and an LLM spend cap (`STUDIO_AGENT_BUDGET_USD`, default 0 = blocked) | run 1 done (2026-10-20); further runs not authorised. Staged plan (Stages A, C): `docs/M5_APPROVAL_BRIEF.md` | before the M5 demo |
+| D1 | Further paid generation (e.g. the first real reference-to-video take, a real two-take revision) | none authorised; paid video and image caps default to 0. Staged plan with separate caps: `docs/DEMO_APPROVAL_BRIEF.md` | before the demo |
+| D2 | First live agent run: Gemini key (`GEMINI_API_KEY`), model, and an LLM spend cap (`STUDIO_AGENT_BUDGET_USD`, default 0 = blocked) | run 1 done (2026-10-20); further runs not authorised. Staged plan: `docs/DEMO_APPROVAL_BRIEF.md` | before the demo |
 | D3 | Public repo owner/name and licence | `motionx-shot-studio`, MIT (matches comfy-sdk and the templates) | before publishing, Oct 28 |
-| D4 | Demo material: which characters, locations and frames we have rights to show (no real likenesses without consent, no private MotionX footage) | repo-made synthetic `samples/` (used in "Last Tram"); better images listed with prompts in the M5 brief, not generated | Oct 24 |
+| D4 | Demo material: which characters, locations and frames we have rights to show (no real likenesses without consent, no private MotionX footage) | "Under the Flyover": the location photo is the owner's to supply (missing so far); the fictional boy and the phone are generated only after approval; prompts in the demo brief | Oct 24 |
 | D5 | Also enter **Open Weights Only** via the native H3 I2V template on Cloud? (licence for open-weights H3 on Cloud is UNVERIFIED) | no. Main category plus the MiniMax H3 bonus | Oct 26 |
+
+## 11. Idea → plan → asset preparation (M6, 2026-10-21)
+
+**Goal.** Let a person go from a written idea to a reviewable short-film plan and the reference images its shots need. It uses the same proposal → human approval → recorded output pattern as video, then hands over to the existing shot/take/revision/export flow. One plan per project; no editing, timeline or assembly.
+
+### 11.1 Plan
+- **Tables:**
+  - `plans`: one per project, with `revision` and `approved_revision`.
+  - `plan_revisions`: immutable (full content, author, note); a DB trigger refuses updates.
+  - `plan_links`: what an approval created, i.e. the scene and one shot per plan shot key.
+- **Content:**
+  - title, logline, treatment;
+  - `observed` (only what the person reported), `creative_additions` (everything added), `guardrails`;
+  - the scene name;
+  - 1–6 shots: `key`, title, intention, action, framing/end framing, move, detail, lighting, lens look, duration, sound, and the `assets` handles they use;
+  - assets: handle, kind, name, description, `source` (upload/generate/either), required, `image_prompt`.
+- **Validation:**
+  - Plan shots follow the same preset and direction rules as real shots. Errors refuse the write; warnings are stored per shot.
+  - Every asset a shot uses must be listed.
+  - Unknown fields are refused, so a model can't slip in a "backstory" field.
+- **Status:**
+  - `draft`: never approved.
+  - `approved`: the approved revision is the latest.
+  - `changed_since_approval`: edited after approval. The approved revision stays marked in the history.
+- **Approval (human only, via the API route):**
+  - It names an `expected_revision`.
+  - It creates the scene and every plan shot that has no linked shot yet. New shots use reference mode at 16:9, with refs pinned for any assets already ready.
+  - It upserts `asset_requirements`.
+  - It **never overwrites** an existing shot; it reports which fields the plan now differs in.
+  - Re-approval is idempotent.
+
+### 11.2 Asset preparation
+- **Readiness is derived, never stored:**
+  - `ready`: a chosen current version exists;
+  - `review`: a generated version is waiting for a person;
+  - `generating`;
+  - `proposed`: an image proposal is pending;
+  - `missing`.
+- **Upload** creates the asset or adds a version. An upload is the person's own choice, so it becomes current.
+- **Generate:**
+  - An `asset_generations` row holds the exact prompt, the input references (pinned version ids and hashes), the model/settings and the estimate. A DB trigger freezes it once decided.
+  - The agent may **propose** (`propose_generation` with `asset` + `prompt`). Only the person's API route approves.
+  - A run submits once (idempotency key = generation id) and polls. It then saves the image as an **unreviewed** asset version with `origin='generated'`, which does **not** become current.
+  - A generation found in `submitting` at startup becomes `submission_unknown` and is never resubmitted.
+- **Choose (human only):**
+  - It makes a version current.
+  - Optionally, it pins that version into the planned shots that list the asset, in the plan's reference order (character, location, props).
+  - Rejected versions stay in history.
+- **Budget:**
+  - A separate image cap (`STUDIO_IMAGE_BUDGET_CREDITS`, `STUDIO_IMAGE_MAX_PAID_ATTEMPTS`; default 0 = disabled), independent of the video ledger and the LLM cap.
+  - Observed charge = the balance delta when both readings exist. This assumes no other paid job runs at the same time.
+
+### 11.3 Image workflow
+Facts below come from the installed templates and the ComfyUI 0.42.1 node source; real output is UNTESTED.
+- **Chosen:** `ByteDanceSeedreamNodeV3` with model **"seedream 5.0 flash"** (templates `api_bytedance_seedream_5_0_flash_t2i` / `_image_edit`, comfyui-workflow-templates 0.11.89, MIT).
+  - One node does text-to-image with 0–10 reference images.
+  - We offer 1K–2K size presets and one image per run.
+- **Price:** the node's price badge in `comfy_api_nodes/nodes_bytedance.py` gives Flash a flat **$0.02574 per image** (≈ 5.43 credits at 211 credits/$). There is no size or per-reference component. Not yet confirmed by a real charge.
+- **Compared (same source):**
+
+  | Model | Price |
+  |---|---|
+  | Nano Banana 2, 1K | ≈ $0.048, plus thinking |
+  | Nano Banana 2 Lite | $0.0408 |
+  | FLUX.2 [pro] | from $0.03; +$0.015–0.12 with references |
+  | FLUX 3, 1K | $0.0686 |
+  | Seedream 5.0 Pro, 1K | $0.045; +$0.003 per extra reference |
+- **Limits:**
+  - reference aspect 1:16–16:1;
+  - output 0.92–4.62 MP;
+  - text rendering is not relied on;
+  - the seed doesn't guarantee determinism;
+  - the provider's content policy applies: a realistic image of a child in hardship may be refused or altered (UNTESTED).
+- **Validation:** `scripts/comfy_check.py graphs` builds the adapter's graphs for 0, 2 and 10 references, and ComfyUI's own `validate_prompt` accepts them offline. Nothing executes and nothing touches the network.
+- **Video stays direct:** reference images go straight into `h3_reference` (reference-to-video). Composing an intermediate start frame is out of scope.
+
+### 11.4 Agent
+- **Tools** stay at four:
+  - new read paths: `/plan`, `/plan/revisions/{n}`, `/preparation`, `/image-workflow`;
+  - `write /plan` takes the whole plan plus `expected_revision`;
+  - `propose_generation` also accepts `asset` + `prompt`, optionally with `references` and `size_preset`;
+  - no tool approves plans or generations, or chooses versions.
+- **Skill** `skills/film-planning.md` works for any brief:
+  - keep what was observed separate from what was added;
+  - guardrails: no invented backstory, no causal claims, fictional people, dignity, no brands or readable text;
+  - about three shots;
+  - image prompts written as reference sheets.
+- **Replay provider** (`STUDIO_AGENT_PROVIDER=replay`): plays back a hand-authored, labelled script through the real tool loop for rehearsals.
+  - It is not a model.
+  - When a tool refuses, it stops and says so.
+  - The demo story lives only in `demo/flyover/` (data and mock), not in production agent code.

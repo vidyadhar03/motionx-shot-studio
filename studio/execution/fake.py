@@ -67,6 +67,11 @@ class FakeAdapter:
 
     def describe_binding(self, req: RenderRequest) -> dict[str, Any]:
         m = self.manifest(req.workflow_id)
+        if m.mode == "image":
+            return {"workflow_id": m.id, "workflow_version": m.version, "fake": True,
+                    "inputs": {"prompt": req.prompt, "size_preset": req.size_preset, "seed": req.seed, **m.fixed,
+                               "references": [{"label": f"image {n}", "sha256": r.sha256}
+                                              for n, r in enumerate(req.references, 1)]}}
         return {"workflow_id": m.id, "workflow_version": m.version, "fake": True,
                 "inputs": {"prompt": req.prompt, "duration": req.duration_s, "resolution": req.resolution,
                            "seed": req.seed, "aspect_ratio": req.aspect_ratio,
@@ -112,6 +117,9 @@ class FakeAdapter:
             return JobState(status="running")
         if job["behaviour"] == "fail":
             return JobState(status="failed", error="fake: provider reported failure")
+        if job["request"].get("mode") == "image":
+            return JobState(status="succeeded", outputs=(OutputRef(id=f"{job_id}-out", name="fake_image.png",
+                                                                   node_id="3", content_type="image/png"),))
         return JobState(status="succeeded",
                         outputs=(OutputRef(id=f"{job_id}-out", name="fake_take.mp4", node_id="26",
                                            content_type="video/mp4"),))
@@ -127,6 +135,8 @@ class FakeAdapter:
         return self._render(job["request"])
 
     def _render(self, request: dict[str, Any]) -> bytes:
+        if request.get("mode") == "image":
+            return _fake_image(request, self.manifest(request["workflow_id"]))
         # Reference mode has no start frame: the placeholder animates Image 1 instead.
         frame = (request.get("start_frame") or (request.get("references") or [None])[0] or {}).get("path")
         if self.render == "ffmpeg" and frame and shutil.which("ffmpeg"):
@@ -175,3 +185,36 @@ def _label_png(path: Path, text: str) -> None:
         font = ImageFont.load_default()
     ImageDraw.Draw(img).text((10, 7), text, fill=(255, 255, 255, 255), font=font)
     img.save(path)
+
+
+def _fake_image(request: dict[str, Any], manifest: Manifest) -> bytes:
+    """A placeholder still at the requested size: grey, with the FAKE banner, the prompt's first words and
+    thumbnails of the reference images, so it can't pass for a model result."""
+    import io
+    import textwrap
+    from PIL import Image, ImageDraw, ImageFont
+    w, h = manifest.capabilities.size_presets[request["size_preset"]]
+    img = Image.new("RGB", (w, h), (70, 72, 78))
+    d = ImageDraw.Draw(img)
+    try:
+        big, small = ImageFont.load_default(size=max(18, w // 40)), ImageFont.load_default(size=max(14, w // 70))
+    except TypeError:                                   # Pillow < 10.1
+        big = small = ImageFont.load_default()
+    d.rectangle([0, 0, w, max(40, h // 12)], fill=(180, 20, 20))
+    d.text((16, 8), "FAKE IMAGE - placeholder, not a model result", fill="white", font=big)
+    y = max(60, h // 10)
+    for line in textwrap.wrap(request["prompt"], width=max(30, w // 18))[:8]:
+        d.text((16, y), line, fill=(225, 225, 225), font=small)
+        y += max(18, w // 60)
+    x = 16
+    for r in request.get("references", [])[:4]:
+        try:
+            ref = Image.open(r["path"]).convert("RGB")
+            ref.thumbnail((w // 5, h // 4))
+            img.paste(ref, (x, h - ref.height - 16))
+            x += ref.width + 12
+        except OSError:
+            pass
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()

@@ -6,6 +6,8 @@ import ShotEditor, { RevisionContext } from "./ShotEditor";
 import ProposalCard from "./ProposalCard";
 import TakeCard from "./TakeCard";
 import ProjectPanel from "./ProjectPanel";
+import PlanPanel from "./PlanPanel";
+import PrepPanel from "./PrepPanel";
 
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
@@ -18,6 +20,7 @@ export default function App() {
   const [revision, setRevision] = useState<RevisionContext | null>(null);
   const [compare, setCompare] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [prepKey, setPrepKey] = useState(0);
 
   const fail = useCallback((e: unknown) => setError(e instanceof Error ? e.message : String(e)), []);
 
@@ -100,6 +103,7 @@ export default function App() {
           {project ? (
             <>
               <ProjectPanel project={project} onSaved={(p) => setProject({ ...project, ...p })} onError={fail} />
+              <button className={`nav-item ${!shot ? "active" : ""}`} onClick={() => { setShot(null); setPrepKey((k) => k + 1); }}>Film plan &amp; assets</button>
               <div className="section-title">Shots
                 <button className="small ghost" onClick={newScene}>+ Scene</button>
                 <button className="small" onClick={() => newShot()}>+ Shot</button></div>
@@ -140,7 +144,13 @@ export default function App() {
                         onOpenShot={(id) => openShot(id)} onError={fail} />
           )}
           <div className="main-content">
-          {!shot && project && <div className="empty big">Select a shot or add one.<br /><button onClick={() => newShot()}>+ Shot</button></div>}
+          {!shot && project && presets && (
+            <>
+              <PlanPanel projectId={project.id} presets={presets} onError={fail} onOpenShot={openShot}
+                         onApproved={() => { refreshProject(project.id); setPrepKey((k) => k + 1); }} />
+              <PrepPanel projectId={project.id} refreshKey={prepKey} onError={fail} onChanged={() => refreshProject(project.id)} />
+            </>
+          )}
           {shot && presets && status && (
             <>
               <ShotEditor key={shot.id} shot={shot} presets={presets} revision={revision} assets={assets} scenes={project?.scenes ?? []}

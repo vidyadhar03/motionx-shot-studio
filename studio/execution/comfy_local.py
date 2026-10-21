@@ -78,9 +78,12 @@ class ComfyLocalAdapter:
     def describe_binding(self, req: RenderRequest) -> dict[str, Any]:
         m = self.manifest(req.workflow_id)
         b = m.bindings
-        values: dict[str, Any] = {"prompt": req.prompt, "resolution": req.resolution, "duration": req.duration_s,
-                                  "seed": req.seed, **m.fixed}
-        if "aspect_ratio" in b and req.aspect_ratio is not None:
+        if m.mode == "image":
+            values: dict[str, Any] = {"prompt": req.prompt, "size_preset": req.size_preset, "seed": req.seed, **m.fixed}
+        else:
+            values = {"prompt": req.prompt, "resolution": req.resolution, "duration": req.duration_s,
+                      "seed": req.seed, **m.fixed}
+        if "aspect_ratio" in b and getattr(req, "aspect_ratio", None) is not None:
             values["aspect_ratio"] = req.aspect_ratio
         inputs = [{"node": b[k]["node"], "field": b[k]["field"], "value": v} for k, v in values.items()]
         images: list[dict[str, Any]] = []
@@ -105,6 +108,11 @@ class ComfyLocalAdapter:
         binding = self.describe_binding(req)
         for item in binding["inputs"]:
             graph[item["node"]]["inputs"][item["field"]] = item["value"]
+        rb = m.bindings.get("reference_image")
+        if rb and rb.get("optional") and not req.references:
+            # No references: drop the template LoadImage and its slot so nothing dangles.
+            graph.pop(rb["node"], None)
+            graph[rb["slot_node"]]["inputs"].pop(rb["slot_field"].format(n=1), None)
         for img in binding["images"]:
             if img.get("clone_of"):
                 graph[img["node"]] = copy.deepcopy(graph[img["clone_of"]])

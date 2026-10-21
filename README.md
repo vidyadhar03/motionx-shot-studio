@@ -1,6 +1,8 @@
 # MotionX Shot Studio
 
-Project-based shot making on ComfyUI. You upload a start frame, write the direction, approve a generation proposal, and get a **take** back. Every take records the exact inputs that produced it. You review and revise, and each revision is a new take; earlier takes are never changed.
+An open-source, Comfy-powered directing workspace: describe an idea, plan shots, prepare references, approve generation and revise with preserved creative decisions. These ideas aren't unique to this project (Higgsfield, for one, documents AI directing, script breakdown, reusable assets and human-triggered generation); this is an open, local, inspectable implementation on Comfy workflows in which every input, approval and revision is recorded.
+
+Each generation is a proposal you approve. A video result is a **take** with the exact inputs that produced it; revisions are new takes, and earlier ones never change.
 
 ```
 MotionX app ─► comfy-sdk (Comfy API v2) ─► comfy-api-proxy ─► local ComfyUI ─► MiniMax H3 Partner Node ─► hosted inference
@@ -78,6 +80,7 @@ One agent loop with four project-scoped tools (`list`, `read`, `write`, `propose
 | Provider | Use | Configure |
 |---|---|---|
 | `scripted` | Development default. A rule-based stand-in, **not an AI**, used to verify the plumbing offline | `STUDIO_AGENT_PROVIDER=scripted` |
+| `replay` | Rehearsals: plays back a hand-authored, labelled script through the real tools. **Not an AI** | `STUDIO_AGENT_PROVIDER=replay`, `STUDIO_AGENT_REPLAY_FILE` |
 | `gemini` | **Default live provider.** Google Gen AI SDK, Interactions API, `gemini-3.8-flash` | `STUDIO_AGENT_PROVIDER=gemini`, `GEMINI_API_KEY`, `STUDIO_AGENT_BUDGET_USD>0` |
 | `anthropic` | Alternative live provider. `claude-opus-5-5` | `STUDIO_AGENT_PROVIDER=anthropic`, `ANTHROPIC_API_KEY`, `STUDIO_AGENT_BUDGET_USD>0` |
 
@@ -89,16 +92,25 @@ One agent loop with four project-scoped tools (`list`, `read`, `write`, `propose
   - **reported:** the provider's raw usage;
   - **calculated:** our list-price estimate, with its method and certainty; the first live run is marked *incomplete*;
   - **confirmed:** only what you enter from the billing console.
-- **Shot direction rules:** start framing, end framing (`end_framing`), pace (`camera_detail`) and duration are separate. Impossible combinations (a push-in that ends wider, an end framing on a static camera, beats past the duration) are refused; redundant or ambiguous wording (restating the move, "ends on her eyes" without `end_framing`) is accepted with a visible warning. A duration change reports its cost impact. Vague or unsupported feedback should get a question, not an invented edit. This is verified with the scripted agent; live-model adherence to the updated skill is untested.
+- **Shot direction rules:** start framing, end framing (`end_framing`), pace (`camera_detail`) and duration are separate. Invalid input (an end framing without a start, camera detail without a move, beats past the duration) is refused. Creative combinations are accepted with a visible warning: a static camera whose subject walks into a closer framing, a push-in that stays within one size, restating the move, or "ends on her eyes" without `end_framing`. A duration change reports its cost impact. Vague or unsupported feedback should get a question, not an invented edit. This is verified with the scripted agent; live-model adherence to the updated skill is untested.
 
-## Demo project
+## Film plan and asset preparation (M6)
+
+- **Plan:** ask the agent to draft a plan from the project brief. A plan has a treatment, what was *observed* vs what is *added*, guardrails, about three shots and the assets they need. Edit it (each save is a revision) and approve a named revision. Approval creates the scene and draft shots and lists the required assets; it never overwrites a shot you already have.
+- **Assets:** each required asset shows *missing / proposed / generating / awaiting your choice / ready*. **Upload** your own image, or **Generate** one: the proposal shows the exact prompt, input references, model and settings, and the estimate before you approve it. A generated image is saved as a new asset version but is used only after you **choose** it; choosing can pin it into the planned shots.
+- **Image workflow:** ByteDance Seedream 5.0 Flash (`workflows/seedream_flash_image.*`), text and 0–10 reference images, about 5.43 credits per image (ComfyUI 0.42.1 price badge; not yet confirmed by a real charge). Paid images have their own caps, `STUDIO_IMAGE_BUDGET_CREDITS` and `STUDIO_IMAGE_MAX_PAID_ATTEMPTS`, both 0 by default.
+- **Agent limits:** it can draft and revise the plan and propose images or videos. It can't approve plans or generations, or choose asset versions.
+
+## Demo project: "Under the Flyover"
 
 ```bash
-.venv/bin/python scripts/demo.py seed --base http://127.0.0.1:8700        # "Last Tram": brief, @oli v1/v2, @street, decision, scene
-.venv/bin/python scripts/demo.py rehearse --base http://127.0.0.1:8700    # all 8 steps on fake outputs; refuses on a paid adapter
+.venv/bin/python scripts/demo.py seed --base http://127.0.0.1:8700        # brief + decisions only
+.venv/bin/python scripts/demo.py rehearse --base http://127.0.0.1:8700    # needs STUDIO_AGENT_PROVIDER=replay (see below)
 ```
 
-`--images DIR` swaps in your own images (same file names as `samples/`). `--stop-after N` pauses the rehearsal at step N. The live plan and its caps are in [docs/M5_APPROVAL_BRIEF.md](docs/M5_APPROVAL_BRIEF.md).
+`rehearse` runs idea → plan → approval → assets → a **pending** first-video proposal through the HTTP API. It refuses unless the app reports the fake adapter and an offline agent. For the agent turns, start the app with `STUDIO_AGENT_PROVIDER=replay STUDIO_AGENT_REPLAY_FILE=demo/flyover/agent_mock.json`: that file is a hand-authored, labelled mock, not model output.
+- **Location photo:** put yours at `demo/flyover/underpass.jpg`. Without it, the rehearsal uploads a labelled placeholder.
+- **Live plan and caps:** [docs/DEMO_APPROVAL_BRIEF.md](docs/DEMO_APPROVAL_BRIEF.md).
 
 ## Tests
 
@@ -109,4 +121,4 @@ One agent loop with four project-scoped tools (`list`, `read`, `write`, `propose
 
 ## Licence and attribution
 
-MIT (pending final decision). `workflows/h3_first_frame.api.json` is derived from Comfy-Org's MIT-licensed `api_minimax_h3_flf2v` template. ComfyUI (GPL-3.0) is installed separately and not redistributed. `workflows/h3_reference.api.json` is derived from the MIT-licensed `api_minimax_h3_r2v` template. `samples/*.png` are synthetic images generated in this repo.
+MIT (pending final decision). `workflows/h3_first_frame.api.json` is derived from Comfy-Org's MIT-licensed `api_minimax_h3_flf2v` template. ComfyUI (GPL-3.0) is installed separately and not redistributed. `workflows/h3_reference.api.json` is derived from the MIT-licensed `api_minimax_h3_r2v` template. `samples/*.png` are synthetic images generated in this repo. `workflows/seedream_flash_image.api.json` follows the MIT-licensed `api_bytedance_seedream_5_0_flash_*` templates.

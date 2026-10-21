@@ -1,0 +1,26 @@
+{
+  "1": {
+    "inputs": {"image": "PLACEHOLDER_REFERENCE_1.png"},
+    "class_type": "LoadImage",
+    "_meta": {"title": "Reference image 1 (template for extra references; removed when there are none)"}
+  },
+  "2": {
+    "inputs": {
+      "prompt": "",
+      "model": "seedream 5.0 flash",
+      "model.size_preset": "(1K) 1424x800 (16:9)",
+      "model.width": 2048,
+      "model.height": 2048,
+      "model.seed": 42,
+      "model.watermark": false,
+      "model.images.image_1": ["1", 0]
+    },
+    "class_type": "ByteDanceSeedreamNodeV3",
+    "_meta": {"title": "ByteDance Seedream 5.0 Flash"}
+  },
+  "3": {
+    "inputs": {"filename_prefix": "image/motionx_asset", "images": ["2", 0]},
+    "class_type": "SaveImage",
+    "_meta": {"title": "Save Image"}
+  }
+}

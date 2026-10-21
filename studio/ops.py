@@ -295,23 +295,50 @@ class Ops:
                       "VALUES (?,?,?,?,?,?)", (new_id("av"), aid, 1, description.strip(), media_sha, ts))
         return self.get_asset(aid)
 
-    def add_asset_version(self, aid: str, *, description: str | None = None, media_sha: str | None = None) -> dict:
+    def add_asset_version(self, aid: str, *, description: str | None = None, media_sha: str | None = None,
+                          origin: str = "upload", generation_id: str | None = None) -> dict:
         """Never edits an existing version. Shots keep pointing at the version they pinned until
-        someone explicitly updates the shot, so earlier takes' inputs stay true."""
+        someone explicitly updates the shot, so earlier takes' inputs stay true. An uploaded version
+        becomes current; a generated one waits until a person chooses it (choose_version)."""
         asset = self.get_asset(aid)
-        cur = asset["versions"][0]
-        desc = cur["description"] if description is None else description.strip()
-        sha = media_sha or cur["media_sha"]
+        cur = self.current_version(asset) or asset["versions"][0] if asset["versions"] else None
+        desc = (cur["description"] if cur else "") if description is None else description.strip()
+        sha = media_sha or (cur["media_sha"] if cur else None)
+        if not sha:
+            raise ValueError("give an image for the first version")
         if media_sha:
             self._require_image(media_sha)
-        if desc == cur["description"] and sha == cur["media_sha"]:
+        if origin == "upload" and cur and desc == cur["description"] and sha == cur["media_sha"]:
             raise ValueError("nothing changed: give a new image or a new description")
         with self.db.tx(immediate=True) as c:
-            n = c.execute("SELECT MAX(version) AS v FROM asset_versions WHERE asset_id=?", (aid,)).fetchone()["v"] + 1
-            c.execute("INSERT INTO asset_versions(id,asset_id,version,description,media_sha,created_at) "
-                      "VALUES (?,?,?,?,?,?)", (new_id("av"), aid, n, desc, sha, now()))
-            c.execute("UPDATE assets SET current_version=? WHERE id=?", (n, aid))
+            n = (c.execute("SELECT MAX(version) AS v FROM asset_versions WHERE asset_id=?", (aid,)).fetchone()["v"] or 0) + 1
+            c.execute("INSERT INTO asset_versions(id,asset_id,version,description,media_sha,created_at,origin,generation_id) "
+                      "VALUES (?,?,?,?,?,?,?,?)", (new_id("av"), aid, n, desc, sha, now(), origin, generation_id))
+            if origin == "upload":
+                c.execute("UPDATE assets SET current_version=? WHERE id=?", (n, aid))
         return self.get_asset(aid)
+
+    def create_generated_asset(self, pid: str, *, kind: str, name: str, handle: str, description: str,
+                               media_sha: str, generation_id: str) -> dict:
+        """First version of an asset that so far only existed as a plan requirement. No version is current
+        until a person chooses one."""
+        if kind not in ASSET_KINDS:
+            raise ValueError(f"kind must be one of {', '.join(ASSET_KINDS)}")
+        self._require_image(media_sha)
+        aid, ts = new_id("ast"), now()
+        with self.db.tx(immediate=True) as c:
+            if c.execute("SELECT 1 FROM assets WHERE project_id=? AND handle=?", (pid, handle)).fetchone():
+                raise ConflictError(f"@{handle} already exists in this project")
+            c.execute("INSERT INTO assets(id,project_id,kind,name,handle,current_version,created_at) "
+                      "VALUES (?,?,?,?,?,0,?)", (aid, pid, kind, name.strip(), handle, ts))
+            c.execute("INSERT INTO asset_versions(id,asset_id,version,description,media_sha,created_at,origin,generation_id) "
+                      "VALUES (?,?,1,?,?,?,'generated',?)", (new_id("av"), aid, description.strip(), media_sha, ts,
+                                                             generation_id))
+        return self.get_asset(aid)
+
+    @staticmethod
+    def current_version(asset: dict) -> dict | None:
+        return next((v for v in asset["versions"] if v["version"] == asset["current_version"]), None)
 
     def _require_image(self, sha: str) -> None:
         row = self.db.one("SELECT kind FROM media WHERE sha256=?", sha)
@@ -323,8 +350,11 @@ class Ops:
         if not a:
             raise NotFoundError(f"asset {aid} not found")
         a["versions"] = self.db.all(
-            "SELECT v.*, m.width, m.height, m.mime FROM asset_versions v JOIN media m ON m.sha256=v.media_sha "
-            "WHERE asset_id=? ORDER BY version DESC", aid)
+            "SELECT v.*, m.width, m.height, m.mime, r.review FROM asset_versions v JOIN media m ON m.sha256=v.media_sha "
+            "LEFT JOIN asset_version_reviews r ON r.asset_version_id=v.id WHERE asset_id=? ORDER BY version DESC", aid)
+        for v in a["versions"]:
+            # Uploaded versions are a person's own choice; generated ones need an explicit review.
+            v["review"] = v["review"] or ("chosen" if v["origin"] == "upload" else "unreviewed")
         return a
 
     def list_assets(self, pid: str) -> list[dict]:

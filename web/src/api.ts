@@ -4,7 +4,8 @@ export type ShotSummary = { id: string; title: string; scene: string; scene_id: 
                             order_idx: number; revision: number; take_count: number };
 export type Scene = { id: string; project_id: string; name: string; order_idx: number };
 export type AssetVersion = { id: string; asset_id: string; version: number; description: string; media_sha: string;
-                             width: number; height: number; created_at: string };
+                             width: number; height: number; created_at: string;
+                             origin: "upload" | "generated"; generation_id: string | null; review: "chosen" | "rejected" | "unreviewed" };
 export type Asset = { id: string; project_id: string; kind: "character" | "location" | "prop"; name: string; handle: string;
                       current_version: number; versions: AssetVersion[] };
 export type RefResolved = { asset_version_id: string; asset_id: string; version: number; latest_version: number;
@@ -77,6 +78,33 @@ export type Accounting = {
   calculated_total_usd: number; confirmed_total_usd: number; confirmed: unknown[]; status: string;
 };
 
+export type PlanShot = { key: string; title: string; intention?: string; action?: string; framing?: string | null;
+  end_framing?: string | null; camera_move?: string | null; camera_detail?: string; lighting?: string | null;
+  lens_look?: string | null; duration_s: number; audio?: string; aspect_ratio?: string; assets: string[] };
+export type PlanAsset = { handle: string; kind: string; name: string; description: string; source: string;
+  required: boolean; image_prompt: string };
+export type PlanContent = { title: string; logline: string; treatment: string; observed: string[];
+  creative_additions: string[]; guardrails: string[]; scene: { name: string }; shots: PlanShot[]; assets: PlanAsset[] };
+export type Plan = { id: string; project_id: string; revision: number; approved_revision: number | null;
+  approved_at: string | null; status: "draft" | "approved" | "changed_since_approval"; content: PlanContent;
+  warnings: Record<string, { code: string; message: string }[]>;
+  links: { kind: string; item_key: string; target_id: string; plan_revision: number }[];
+  revisions: { revision: number; author: string; note: string; at: string; approved: boolean }[] };
+export type AssetGen = { id: string; handle: string; status: string; created_by: string; note: string; est_credits: number;
+  adapter: string; is_paid: number; asset_version_id: string | null; output_sha: string | null; error: string | null;
+  created_at: string; request: { prompt: string; size_preset: string; seed: number;
+    references: { asset_version_id: string; handle: string; version: number; sha256: string; label: string }[] };
+  settings: Record<string, any> };
+export type Requirement = { handle: string; kind: string; name: string; description: string; source: string;
+  image_prompt: string; required: boolean; status: "missing" | "proposed" | "generating" | "review" | "ready";
+  asset: Asset | null; current: AssetVersion | null;
+  generations: { id: string; status: string; created_by: string; est_credits: number; asset_version_id: string | null }[];
+  shots: { key: string; shot_id: string; title: string; pinned_version: number | null }[] };
+export type Preparation = { requirements: Requirement[]; ready: number; missing_required: string[];
+  image_budget: { is_paid: boolean; budget_credits: number; max_attempts: number; attempts: number; committed_credits: number } };
+export type ImageWorkflow = { id: string; title: string; size_presets: string[]; max_references: number;
+  est_credits_per_image: number; adapter: string; is_paid: boolean; pricing: { basis: string } };
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
@@ -133,8 +161,26 @@ export const api = {
   accounting: () => call<Accounting>("GET", "/api/agent/accounting"),
   resume: (tid: string) => call<Take>("POST", `/api/takes/${tid}/resume`),
   resolve: (tid: string, body: { job_id?: string; resubmit?: boolean }) => call<Take>("POST", `/api/takes/${tid}/resolve`, body),
+  plan: (pid: string) => call<Plan | null>("GET", `/api/projects/${pid}/plan`),
+  savePlan: (pid: string, content: PlanContent, expected_revision: number | null, note: string) =>
+    call<Plan>("PUT", `/api/projects/${pid}/plan`, { content, expected_revision, note }),
+  approvePlan: (planId: string, expected_revision: number) =>
+    call<{ plan: Plan; report: Record<string, any> }>("POST", `/api/plans/${planId}/approve`, { expected_revision }),
+  planDiff: (planId: string, a: number, b: number) => call<Record<string, any>>("GET", `/api/plans/${planId}/diff?a=${a}&b=${b}`),
+  preparation: (pid: string) => call<Preparation>("GET", `/api/projects/${pid}/preparation`),
+  imageWorkflow: () => call<ImageWorkflow>("GET", "/api/image-workflow"),
+  assetGens: (pid: string) => call<AssetGen[]>("GET", `/api/projects/${pid}/asset-generations`),
+  proposeAssetGen: (pid: string, body: { handle: string; prompt: string; reference_version_ids: string[]; size_preset: string; note: string }) =>
+    call<AssetGen>("POST", `/api/projects/${pid}/asset-generations`, body),
+  approveAssetGen: (gid: string) => call<AssetGen>("POST", `/api/asset-generations/${gid}/approve`),
+  rejectAssetGen: (gid: string) => call<AssetGen>("POST", `/api/asset-generations/${gid}/reject`),
+  chooseVersion: (avid: string, pin: boolean) =>
+    call<{ asset: Asset; pinned_shots: { key: string }[] }>("POST", `/api/asset-versions/${avid}/choose`, { pin_to_planned_shots: pin }),
+  rejectVersion: (avid: string) => call<Asset>("POST", `/api/asset-versions/${avid}/reject`),
   candidates: (tid: string) => call<{ jobs: { id: string; status: string; created_at: string }[] }>("GET", `/api/takes/${tid}/candidates`),
 };
 
 export const media = (sha: string) => `/api/media/${sha}`;
+// The chosen version (generated versions wait for a person); undefined when none is chosen yet.
+export const currentVersion = (a: Asset) => a.versions.find((v) => v.version === a.current_version);
 export const ACTIVE = new Set(["queued", "submitting", "submitted", "running", "generated"]);

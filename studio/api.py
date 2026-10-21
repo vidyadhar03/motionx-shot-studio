@@ -26,6 +26,8 @@ from .export import Exporter, ExportIntegrityError
 from .agent.loop import AgentBudgetError, AgentRunner
 from .agent.providers.base import ProviderConfigError
 from .agent.store import AgentStore
+from .assetgen import AssetGenerations
+from .planning import Planning
 
 log = logging.getLogger("studio")
 
@@ -105,6 +107,34 @@ class ResolveIn(BaseModel):
     resubmit: bool = False
 
 
+class BillingIn(BaseModel):
+    provider: str
+    period: str
+    amount_usd: float
+    source: str
+    note: str = ""
+
+
+
+class PlanIn(BaseModel):
+    content: dict[str, Any]
+    expected_revision: int | None = None
+    note: str = ""
+
+class ApproveIn(BaseModel):
+    expected_revision: int
+
+class AssetGenIn(BaseModel):
+    handle: str
+    prompt: str
+    reference_version_ids: list[str] = Field(default_factory=list)
+    size_preset: str | None = None
+    note: str = ""
+
+class ChooseIn(BaseModel):
+    pin_to_planned_shots: bool = True
+
+
 def create_app(settings: Settings | None = None, *, adapter: Adapter | None = None,
                balance_fn: Callable[[str | None], float | None] = fetch_balance_credits,
                start_worker: bool = True) -> FastAPI:
@@ -115,19 +145,32 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     adapter = adapter or make_adapter(settings)
     service = GenerationService(db, ops, media, adapter, settings, balance_fn=balance_fn)
     agent = AgentRunner(settings, ops, service, media, AgentStore(db))
+    planning = Planning(db, ops)
+    assetgen = AssetGenerations(db, ops, media, adapter, settings, balance_fn=balance_fn)
+    image_tasks: set = set()
+
+    def schedule_image(gid: str) -> None:
+        import asyncio
+        task = asyncio.get_running_loop().create_task(asyncio.to_thread(assetgen.run, gid))
+        image_tasks.add(task)
+        task.add_done_callback(image_tasks.discard)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        import asyncio
         dispatcher = Dispatcher(service, max_running=settings.max_running)
         app.state.dispatcher = dispatcher
         if start_worker:
             await dispatcher.start(settings.sweep_interval_s)
+            for gid in await asyncio.to_thread(assetgen.recover):
+                schedule_image(gid)
         yield
         await dispatcher.stop()
 
     app = FastAPI(title="MotionX Shot Studio", lifespan=lifespan)
     app.state.settings, app.state.service, app.state.ops, app.state.media = settings, service, ops, media
     app.state.agent = agent
+    app.state.planning, app.state.assetgen, app.state.image_tasks = planning, assetgen, image_tasks
 
     def err(status: int, e: Exception) -> JSONResponse:
         return JSONResponse(status_code=status, content={"error": type(e).__name__, "detail": str(e)})
@@ -222,6 +265,70 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
                         headers={"Content-Disposition": f'attachment; filename="{name}"',
                                  "X-Export-Files": str(len(m["items"])), "X-Export-Missing": str(len(m["missing"]))})
 
+    # -- M6: film plan (idea -> reviewable plan) -------------------------------------------
+    @app.get("/api/projects/{pid}/plan")
+    def get_plan(pid: str) -> dict | None:
+        ops.get_project(pid)
+        return planning.get_plan(pid)
+
+    @app.put("/api/projects/{pid}/plan")
+    def put_plan(pid: str, body: PlanIn) -> dict:
+        return planning.write_plan(pid, body.content, expected_revision=body.expected_revision, author="user",
+                                   note=body.note)
+
+    @app.get("/api/plans/{plan_id}/diff")
+    def plan_diff(plan_id: str, a: int, b: int) -> dict:
+        return planning.diff(plan_id, a, b)
+
+    @app.post("/api/plans/{plan_id}/approve")
+    def approve_plan(plan_id: str, body: ApproveIn) -> dict:
+        # HUMAN-ONLY: the only caller of Planning.approve(). No agent tool wraps it.
+        return planning.approve(plan_id, body.expected_revision, by="user")
+
+    # -- M6: asset preparation and image generation -----------------------------------------
+    @app.get("/api/projects/{pid}/preparation")
+    def preparation(pid: str) -> dict:
+        ops.get_project(pid)
+        return {**planning.preparation(pid), "image_budget": assetgen.budget()}
+
+    @app.get("/api/image-workflow")
+    def image_workflow() -> dict:
+        m = adapter.manifest(settings.image_workflow)
+        return {"id": m.id, "title": m.raw["title"], "source": m.raw["source"], "fixed": m.fixed,
+                "size_presets": list(m.capabilities.size_presets), "max_references": m.capabilities.reference_images,
+                "est_credits_per_image": m.credits_estimate_image(1), "pricing": m.raw["pricing"],
+                "adapter": adapter.name, "is_paid": adapter.is_paid, "budget": assetgen.budget()}
+
+    @app.get("/api/projects/{pid}/asset-generations")
+    def list_asset_generations(pid: str) -> list[dict]:
+        return assetgen.list(pid)
+
+    @app.post("/api/projects/{pid}/asset-generations", status_code=201)
+    def propose_asset_generation(pid: str, body: AssetGenIn) -> dict:
+        return assetgen.create_proposal(pid, body.handle, prompt=body.prompt, created_by="user",
+                                        reference_version_ids=body.reference_version_ids,
+                                        size_preset=body.size_preset, note=body.note)
+
+    @app.post("/api/asset-generations/{gid}/approve")
+    async def approve_asset_generation(gid: str) -> dict:
+        # HUMAN-ONLY: the only caller of AssetGenerations.approve(). No agent tool wraps it.
+        import asyncio
+        g = await asyncio.to_thread(assetgen.approve, gid, "user")
+        schedule_image(gid)
+        return g
+
+    @app.post("/api/asset-generations/{gid}/reject")
+    def reject_asset_generation(gid: str) -> dict:
+        return assetgen.reject(gid)
+
+    @app.post("/api/asset-versions/{avid}/choose")
+    def choose_asset_version(avid: str, body: ChooseIn) -> dict:
+        return planning.choose_version(avid, pin_to_planned_shots=body.pin_to_planned_shots)
+
+    @app.post("/api/asset-versions/{avid}/reject")
+    def reject_asset_version(avid: str) -> dict:
+        return planning.reject_version(avid)
+
     # -- decisions, lock, revision history --------------------------------------------------
     @app.get("/api/projects/{pid}/decisions")
     def list_decisions(pid: str) -> list[dict]:
@@ -244,7 +351,7 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     @app.get("/api/agent/config")
     def agent_config() -> dict:
         prov = settings.agent_provider
-        return {"provider": prov, "model": agent.default_model(prov), "live": prov != "scripted",
+        return {"provider": prov, "model": agent.default_model(prov), "live": prov in ("gemini", "anthropic"),
                 "budget_usd": settings.agent_budget_usd, "spent_usd": agent.store.live_spend_usd(),
                 "max_live_requests": settings.agent_max_live_requests, "live_requests": agent.store.live_requests(),
                 "thinking": settings.agent_thinking,
@@ -255,13 +362,6 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     @app.get("/api/agent/accounting")
     def accounting() -> dict:
         return agent.store.accounting()
-
-    class BillingIn(BaseModel):
-        provider: str
-        period: str
-        amount_usd: float
-        source: str
-        note: str = ""
 
     @app.post("/api/agent/billing", status_code=201)
     def confirm_billing(body: BillingIn) -> dict:

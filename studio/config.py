@@ -35,6 +35,9 @@ class Settings:
     comfy_api_key: str | None = field(default=None, repr=False)   # Partner Node key
     budget_credits: float = 0.0       # hard cap on paid spend (reserved + observed); 0 = paid video disabled
     max_paid_attempts: int = 0        # hard cap on paid submissions; 0 = paid video disabled
+    image_budget_credits: float = 0.0  # separate cap on paid image generation (M6); 0 = paid images disabled
+    image_max_paid_attempts: int = 0
+    image_workflow: str = "seedream_flash_image"
     max_running: int = 1
     poll_interval_s: float = 5.0
     poll_deadline_s: float = 1800.0   # local patience per worker run; NOT a provider failure
@@ -44,7 +47,8 @@ class Settings:
     charge_settle_attempts: int = 4   # ... this many times before leaving the charge "pending"
     # -- agent (M3). Scripted is the development default; live providers are blocked while the
     #    LLM budget is 0. The LLM budget is independent of Comfy credits.
-    agent_provider: str = "scripted"  # scripted | gemini | anthropic
+    agent_provider: str = "scripted"  # scripted | replay (hand-authored mock) | gemini | anthropic
+    agent_replay_file: str = ""       # replay provider: path to the labelled script
     agent_model: str = ""             # empty = provider default (gemini-3.8-flash / claude-opus-5-5)
     agent_max_turns: int = 12
     agent_max_output_tokens: int = 8000
@@ -85,6 +89,9 @@ class Settings:
             comfy_api_key=g("COMFY_API_KEY") or None,
             budget_credits=float(g("STUDIO_BUDGET_CREDITS", "0")),
             max_paid_attempts=int(g("STUDIO_MAX_PAID_ATTEMPTS", "0")),
+            image_budget_credits=float(g("STUDIO_IMAGE_BUDGET_CREDITS", "0")),
+            image_max_paid_attempts=int(g("STUDIO_IMAGE_MAX_PAID_ATTEMPTS", "0")),
+            image_workflow=g("STUDIO_IMAGE_WORKFLOW", "seedream_flash_image"),
             max_running=int(g("STUDIO_MAX_RUNNING", "1")),
             poll_interval_s=float(g("STUDIO_POLL_INTERVAL_S", "5")),
             poll_deadline_s=float(g("STUDIO_POLL_DEADLINE_S", "1800")),
@@ -93,6 +100,7 @@ class Settings:
             charge_settle_attempts=int(g("STUDIO_CHARGE_SETTLE_ATTEMPTS", "4")),
             agent_provider=g("STUDIO_AGENT_PROVIDER", "scripted"),
             agent_model=g("STUDIO_AGENT_MODEL", ""),
+            agent_replay_file=g("STUDIO_AGENT_REPLAY_FILE", ""),
             agent_max_turns=int(g("STUDIO_AGENT_MAX_TURNS", "12")),
             agent_max_output_tokens=int(g("STUDIO_AGENT_MAX_OUTPUT_TOKENS", "8000")),
             agent_thinking=g("STUDIO_AGENT_THINKING", "low"),

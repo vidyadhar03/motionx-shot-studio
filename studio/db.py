@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS assets (
   kind TEXT NOT NULL CHECK (kind IN ('character','location','prop')),
   name TEXT NOT NULL,
   handle TEXT NOT NULL,
-  current_version INTEGER NOT NULL DEFAULT 1,
+  current_version INTEGER NOT NULL DEFAULT 1,     -- 0 = no version chosen yet (generated, unreviewed)
   created_at TEXT NOT NULL,
   UNIQUE (project_id, handle)
 );
@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS asset_versions (
   description TEXT NOT NULL DEFAULT '',
   media_sha TEXT NOT NULL REFERENCES media(sha256),
   created_at TEXT NOT NULL,
+  origin TEXT NOT NULL DEFAULT 'upload',          -- upload | generated
+  generation_id TEXT,                              -- asset_generations.id when generated
   UNIQUE (asset_id, version)
 );
 
@@ -257,6 +259,95 @@ CREATE TABLE IF NOT EXISTS spend (
   at TEXT NOT NULL
 );
 
+-- M6: one short-film plan per project. Every edit is a new immutable revision; approval names a revision.
+CREATE TABLE IF NOT EXISTS plans (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL UNIQUE REFERENCES projects(id),
+  revision INTEGER NOT NULL,
+  approved_revision INTEGER,                      -- approved iff approved_revision = revision
+  approved_at TEXT,
+  approved_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS plan_revisions (
+  plan_id TEXT NOT NULL REFERENCES plans(id),
+  revision INTEGER NOT NULL,
+  content TEXT NOT NULL,                          -- JSON: treatment, observed/creative, scene, shots, assets
+  author TEXT NOT NULL,                           -- user | agent
+  note TEXT NOT NULL DEFAULT '',
+  at TEXT NOT NULL,
+  PRIMARY KEY (plan_id, revision)
+);
+
+CREATE TRIGGER IF NOT EXISTS plan_revisions_immutable
+BEFORE UPDATE ON plan_revisions
+BEGIN SELECT RAISE(ABORT, 'plan revisions are immutable; write a new revision'); END;
+
+-- What an approved plan created (scene, shots), keyed by the plan's own item keys.
+CREATE TABLE IF NOT EXISTS plan_links (
+  plan_id TEXT NOT NULL REFERENCES plans(id),
+  kind TEXT NOT NULL CHECK (kind IN ('scene','shot')),
+  item_key TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  plan_revision INTEGER NOT NULL,
+  PRIMARY KEY (plan_id, kind, item_key)
+);
+
+-- Assets an approved plan needs. Readiness is derived from the assets/asset_versions tables.
+CREATE TABLE IF NOT EXISTS asset_requirements (
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  handle TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('character','location','prop')),
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL CHECK (source IN ('upload','generate','either')),
+  image_prompt TEXT NOT NULL DEFAULT '',
+  required INTEGER NOT NULL DEFAULT 1,
+  plan_revision INTEGER NOT NULL,
+  PRIMARY KEY (project_id, handle)
+);
+
+-- A person's decision on a version (generated versions must be chosen before shots can use them).
+CREATE TABLE IF NOT EXISTS asset_version_reviews (
+  asset_version_id TEXT PRIMARY KEY REFERENCES asset_versions(id),
+  review TEXT NOT NULL CHECK (review IN ('chosen','rejected')),
+  by TEXT NOT NULL,
+  at TEXT NOT NULL
+);
+
+-- Image generation for an asset: proposal -> human approval -> one job -> a new asset version.
+CREATE TABLE IF NOT EXISTS asset_generations (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  handle TEXT NOT NULL,
+  status TEXT NOT NULL,          -- pending|rejected|approved|submitting|running|succeeded|failed|submission_unknown
+  created_by TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  workflow_id TEXT NOT NULL,
+  request TEXT NOT NULL,         -- JSON: prompt, size_preset, seed, references [{asset_version_id, sha256, label}]
+  settings TEXT NOT NULL,        -- JSON: model and fixed workflow settings, for review
+  est_credits REAL NOT NULL,
+  adapter TEXT NOT NULL,
+  is_paid INTEGER NOT NULL,
+  job_id TEXT,
+  output_sha TEXT REFERENCES media(sha256),
+  asset_version_id TEXT REFERENCES asset_versions(id),
+  balance_before REAL,
+  observed_credits REAL,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  decided_at TEXT,
+  decided_by TEXT,
+  finished_at TEXT
+);
+
+CREATE TRIGGER IF NOT EXISTS asset_generation_request_frozen
+BEFORE UPDATE OF request, settings, workflow_id, handle, est_credits ON asset_generations
+WHEN OLD.status != 'pending'
+BEGIN SELECT RAISE(ABORT, 'a decided asset generation is frozen'); END;
+
 CREATE TRIGGER IF NOT EXISTS takes_snapshot_immutable
 BEFORE UPDATE OF snapshot, proposal_id, shot_id, number ON takes
 BEGIN SELECT RAISE(ABORT, 'take snapshot and identity are immutable'); END;
@@ -303,6 +394,7 @@ class Database:
                   ("locked", "INTEGER NOT NULL DEFAULT 0"),
                   ("end_framing", "TEXT")],
         "takes": [("cancel_requested_at", "TEXT"), ("cancel_outcome", "TEXT")],
+        "asset_versions": [("origin", "TEXT NOT NULL DEFAULT 'upload'"), ("generation_id", "TEXT")],
         "proposals": [("context", "TEXT"), ("context_hash", "TEXT"), ("stale_reason", "TEXT")],
         "agent_usage": [("thought_tokens", "INTEGER NOT NULL DEFAULT 0"), ("pre_estimate_usd", "REAL"),
                         ("raw_usage", "TEXT"), ("calc_method", "TEXT")],

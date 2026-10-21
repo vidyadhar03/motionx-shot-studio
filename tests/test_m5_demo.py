@@ -18,19 +18,35 @@ from studio.execution.fake import FakeAdapter
 sys.path.insert(0, str(ROOT / "scripts"))
 import demo  # noqa: E402
 
+# The former "Last Tram" demo data, kept here as a fixture for the scripted first-shot rules.
+BRIEF = ("A short mood piece. Oli misses the last tram home and walks into the rain. Scene 1, tram stop at night: she "
+         "arrives just too late; the street is empty and the only company is the rain and the lamps.")
+DIRECTION = {"tone": "quiet, melancholic noir", "palette": "sodium orange, ink blue", "notes": "rain-slick reflective surfaces"}
+ASSETS = [
+    {"kind": "character", "name": "Oli", "handle": "oli", "versions": [
+        ("asset_oli_v1.png", "woman in a red raincoat, short dark hair"),
+        ("asset_oli_v2.png", "woman in a yellow raincoat, short dark hair")]},
+    {"kind": "location", "name": "Tram street", "handle": "street", "versions": [
+        ("asset_street.png", "wet cobbled street under three sodium lamps at night, empty")]},
+]
+DECISION = "No score anywhere in the film; diegetic sound only."
+REQUEST_FIRST_SHOT = ("Draft the opening shot for scene {scene_id}. Intention: Oli arrives at the tram stop just "
+                      "too late; the street is empty and she is alone in the rain. Action: @oli stands still under "
+                      "the middle lamp as rain falls; 3-5s: she turns her head to look down the empty street.")
+
 
 def _demo_project(world: World) -> tuple[str, str]:
     ops, media = world.ops, world.media
-    p = ops.create_project("Last Tram", demo.PROJECT["brief"], demo.PROJECT["direction"])
-    for a in demo.ASSETS:
+    p = ops.create_project("Last Tram", BRIEF, DIRECTION)
+    for a in ASSETS:
         (f0, d0), *rest = a["versions"]
         asset = ops.create_asset(p["id"], kind=a["kind"], name=a["name"], handle=a["handle"], description=d0,
                                  media_sha=media.put_image((ROOT / "samples" / f0).read_bytes()).sha256)
         for f, d in rest:
             ops.add_asset_version(asset["id"], description=d,
                                   media_sha=media.put_image((ROOT / "samples" / f).read_bytes()).sha256)
-    ops.add_decision(p["id"], demo.DECISION)
-    return p["id"], ops.create_scene(p["id"], demo.SCENE)["id"]
+    ops.add_decision(p["id"], DECISION)
+    return p["id"], ops.create_scene(p["id"], "1 · Tram stop, night")["id"]
 
 
 def _agent(world: World) -> AgentRunner:
@@ -41,7 +57,7 @@ def test_scripted_first_shot_drafts_a_reference_shot_and_a_pending_proposal(worl
     pid, scene = _demo_project(world)
     ag = _agent(world)
     tid = ag.create_thread(pid)["id"]
-    ag.send(tid, demo.REQUEST_FIRST_SHOT.format(scene_id=scene))
+    ag.send(tid, REQUEST_FIRST_SHOT.format(scene_id=scene))
     calls = AgentStore(world.db).calls(tid)
     assert [c["name"] for c in calls][-2:] == ["write", "propose_generation"]
     assert all(c["status"] == "done" for c in calls)
@@ -83,9 +99,10 @@ def test_ffmpeg_fake_clips_carry_a_visible_fake_banner(tmp_path: Path):
     assert r > 120 and g < 80 and b < 80
 
 
-def test_rehearsal_refuses_anything_but_the_fake_adapter_and_scripted_agent():
-    class RealRoute:
+@pytest.mark.parametrize("adapter,provider,live", [("comfy_local", "replay", False), ("fake", "gemini", True)])
+def test_rehearsal_refuses_anything_but_the_fake_adapter_and_an_offline_agent(adapter, provider, live):
+    class Route:
         def call(self, method, path, body=None, raw=False):
-            return {"adapter": "comfy_local"} if path == "/api/status" else {"provider": "scripted", "live": False}
+            return {"adapter": adapter} if path == "/api/status" else {"provider": provider, "live": live}
     with pytest.raises(SystemExit, match="refusing to rehearse"):
-        demo.rehearse(RealRoute(), None)
+        demo.rehearse(Route(), None)

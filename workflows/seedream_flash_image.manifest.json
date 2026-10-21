@@ -1,0 +1,53 @@
+{
+  "id": "seedream_flash_image",
+  "version": 1,
+  "title": "ByteDance Seedream 5.0 Flash: text (and optional reference images) to image",
+  "mode": "image",
+  "workflow_file": "seedream_flash_image.api.json",
+  "source": {
+    "template": "api_bytedance_seedream_5_0_flash_t2i and api_bytedance_seedream_5_0_flash_image_edit (same node, ByteDanceSeedreamNodeV3)",
+    "package": "comfyui-workflow-templates 0.11.89",
+    "license": "MIT (Comfy-Org/workflow_templates)",
+    "converted_with": "API format written from the templates' node and widget values; SaveImageAdvanced replaced by core SaveImage; validated offline with ComfyUI 0.42.1 validate_prompt"
+  },
+  "comfyui_min_version": "0.42.1",
+  "partner_node": true,
+  "bindings": {
+    "reference_image": {"node": "1", "field": "image", "kind": "asset", "repeat": true, "optional": true,
+                        "slot_node": "2", "slot_field": "model.images.image_{n}", "extra_node_base": 1000},
+    "prompt": {"node": "2", "field": "prompt"},
+    "model": {"node": "2", "field": "model"},
+    "size_preset": {"node": "2", "field": "model.size_preset"},
+    "width": {"node": "2", "field": "model.width"},
+    "height": {"node": "2", "field": "model.height"},
+    "seed": {"node": "2", "field": "model.seed"},
+    "watermark": {"node": "2", "field": "model.watermark"},
+    "output": {"node": "3"}
+  },
+  "fixed": {"model": "seedream 5.0 flash", "watermark": false, "width": 2048, "height": 2048},
+  "capabilities": {
+    "reference_images": 10,
+    "reference_images_min": 0,
+    "reference_aspect_min": 0.0625,
+    "reference_aspect_max": 16,
+    "image_min_side_px": 64,
+    "image_mime_types": ["image/png", "image/jpeg", "image/webp"],
+    "size_presets": {
+      "(1K) 1024x1024 (1:1)": [1024, 1024], "(1K) 864x1152 (3:4)": [864, 1152], "(1K) 1152x864 (4:3)": [1152, 864],
+      "(1K) 1424x800 (16:9)": [1424, 800], "(1K) 800x1424 (9:16)": [800, 1424], "(1K) 832x1248 (2:3)": [832, 1248],
+      "(1K) 1248x832 (3:2)": [1248, 832], "(1K) 1568x672 (21:9)": [1568, 672],
+      "(1.5K) 2048x1152 (16:9)": [2048, 1152], "(1.5K) 1248x1872 (2:3)": [1248, 1872],
+      "(2K) 2816x1584 (16:9)": [2816, 1584], "(2K) 1664x2496 (2:3)": [1664, 2496]
+    },
+    "outputs_per_run": 1,
+    "seed": {"min": 0, "max": 2147483647, "deterministic": false},
+    "max_prompt_chars": 4000,
+    "text_rendering": "not relied on"
+  },
+  "pricing": {
+    "basis": "ByteDanceSeedreamNodeV3 price badge, ComfyUI 0.42.1 (comfy_api_nodes/nodes_bytedance.py): 'seedream 5.0 flash' = 0.02574 USD per image, flat: no size or per-reference component (Pro adds 0.003 per extra reference; Flash does not)",
+    "usd_per_image": 0.02574,
+    "credits_per_usd": 211,
+    "verified_by_real_charge": false
+  }
+}

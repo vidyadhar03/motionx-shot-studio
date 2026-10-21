@@ -32,7 +32,8 @@ No `AGENTS.md` or `CLAUDE.md` exists in spike, video-harness, locvis or location
 | **M2** | Fri 23 – Sat 24 | Project-scoped Character/Location/Prop assets with immutable versions, scenes, the reference path (`h3_reference` via `MinimaxHailuo03ReferenceNode`, 1–9 images, "Image N" binding), capability errors in the UI | **Done (2026-10-20) on the fake adapter plus offline ComfyUI graph validation.** No real reference-to-video generation has run (§5b) |
 | **M3** | Sun 25 – Mon 26 | Agent: one loop, 4 project-scoped tools, `skills/shot-direction.md`, persisted threads and tool ledger; providers scripted (dev default), **Gemini (default live)**, Anthropic; LLM spend cap | **Done (2026-10-20) with the scripted provider and mocked SDK tests.** No live LLM call has been made (§5c) |
 | **M4** | Tue 27 – Wed 28 | Export (selected takes + manifest), cancellation, README check from a clean clone, direction fixes from the live test, LLM cost accounting | **Done (2026-10-20) offline:** fake video, scripted agent, mocked SDKs (§5d). No paid or live calls |
-| **M5** | Thu 29 | Demo project with licensed inputs, demo video, publish (needs approval), submit | **Preparation done (2026-10-21) offline:** "Last Tram" demo seeded and rehearsed end to end with fake outputs (§5f). Live stages A–D await approval in `docs/M5_APPROVAL_BRIEF.md` |
+| **M5** | Thu 29 | Demo project with licensed inputs, demo video, publish (needs approval), submit | Prep tooling done (2026-10-21, §5f). The "Last Tram" demo was **replaced** by "Under the Flyover" (§5g). Live stages await approval in `docs/DEMO_APPROVAL_BRIEF.md` |
+| **M6** | Tue 21 – Thu 23 | Idea → reviewable film plan (revisions, explicit approval) → asset preparation (Upload or Generate, one image workflow, human choice of generated versions) → existing shot/take flow. Remaining framing restrictions relaxed | **Done (2026-10-21) offline:** fake adapter, replay mock and scripted agent; graphs validated offline (§5g). No live calls |
 
 ## 3. Local execution setup (verified 2026-10-20)
 
@@ -249,13 +250,28 @@ A fresh `git clone` of commit `510696e` into an empty directory. No `.env`, `dat
   - length limits.
 
   These are now **warnings**: restating the move, mentioning another move (or zoom/crane), implying a tighter end without `end_framing`, an end equal to the start, and a pan/tilt changing size. The write is accepted; the shot carries `direction_warnings`, the editor shows them, and the agent's `write` result lists them.
-- **Demo "Last Tram"** (`scripts/demo.py seed|rehearse`): rights-clear synthetic assets only (`samples/`), one scene, a recorded "no score" decision. `rehearse` refuses unless the app reports the fake adapter and the scripted agent. It runs all eight journey steps through the HTTP API and checks the export hashes.
+- **Demo "Last Tram"** (since replaced by "Under the Flyover", §5g): rights-clear synthetic assets only (`samples/`), one scene, a recorded "no score" decision. `rehearse` refuses unless the app reports the fake adapter and the scripted agent. It runs all eight journey steps through the HTTP API and checks the export hashes.
 - **Scripted first-shot plan** (references → draft shot → pending proposal) and a matching skill section, so the "agent proposes the first shot" step can be rehearsed offline. Like the rest of the scripted provider, it is rule-based and proves plumbing, not model quality.
 - **Fake clips** (ffmpeg mode) carry a burned-in "FAKE OUTPUT" banner.
 - **UI fixes found in rehearsal:**
   - The duration select lacked 7 s, so a 7 s shot displayed as "4s".
   - At widths ≥ 1250 px the floating agent panel covered take cards; it now has its own grid column.
-- **Tests:** 119 pass. The brief, rehearsal screenshots and reference sheet are in `docs/M5_APPROVAL_BRIEF.md` and `docs/demo/`.
+- **Tests:** 119 passed at the time. The Last Tram brief and screenshots were removed with the demo (they remain in git history, commit `b6c7c54`).
+
+## 5g. M6: idea → plan → asset preparation (offline only; no live LLM, image or video calls)
+
+| Area | Result |
+|---|---|
+| Plan | `plans` + immutable `plan_revisions` + `plan_links`. Person or agent writes a whole plan per revision; approval (human route, `expected_revision`) creates the scene and missing shots, records `asset_requirements`, never overwrites an existing shot and reports where the plan differs |
+| Assets | Readiness derived (missing/proposed/generating/review/ready). Upload = current at once. Generated versions are saved **unreviewed** and become current only when a person chooses them; choosing can pin them into the planned shots in plan order |
+| Image workflow | Seedream 5.0 Flash via `ByteDanceSeedreamNodeV3` (0–10 refs, 1K–2K presets), $0.02574/image from the ComfyUI 0.42.1 price badge (≈ 5.43 credits). Graphs for 0/2/10 refs VALID under `validate_prompt` offline. Separate image caps, default 0 |
+| Agent | Same four tools; `/plan`, `/preparation`, `/image-workflow`; `propose_generation` for asset images; no approve/choose tool. New brief-agnostic skill `film-planning`. Replay provider for labelled mocks |
+| Framing | Static/pan/tilt or a reversed push/pull with an end framing are warnings; the prompt credits the subject's movement. Only an end framing without a start is refused |
+| Demo | "Under the Flyover" (`demo/flyover/`, `scripts/demo.py`). Rehearsed: idea → mocked plan → approval → location upload (labelled placeholder: no photo supplied) → mocked image proposals → approve (FAKE images) → choose → mocked first-video proposal, **left pending** |
+| Fixed on the way | The M4 "confirm billing" HTTP route always returned 422 (its body model was nested in `create_app`); fixed with a regression test. Asset UI used the newest version as "current"; it now uses the chosen one. Agent input no longer says "Open a shot first" |
+| Tests | 143 pass (new: plan revisions/approval, invalid plans, warnings, image approval and review, upload/generate coexistence, ref order, video-flow compatibility, separate image caps, pure image graphs, HTTP bodies, mocked agent journey, agent can't approve) |
+
+**Not verified:** any live model behaviour (plan quality, nested tool schema on Gemini, Seedream output or content-policy handling, H3 with these references), and real image charges.
 
 ## 6. Main risks
 

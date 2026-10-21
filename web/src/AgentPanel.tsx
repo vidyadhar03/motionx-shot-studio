@@ -45,15 +45,16 @@ export default function AgentPanel({ projectId, focusShot, onStateChanged, onOpe
     ...view.tool_calls.map((c) => ({ at: c.started_at, key: `c${c.id}`, msg: null, call: c })),
   ].sort((a, b) => a.at.localeCompare(b.at)) : [];
 
-  const scripted = view?.thread.provider === "scripted";
+  const scripted = view?.thread.provider === "scripted" || view?.thread.provider === "replay";
+  const offlineLabel = view?.thread.provider === "replay" ? "MOCKED · hand-authored, no LLM" : "SCRIPTED · no LLM";
   return (
     <aside className="agent-panel">
       <div className="section-title">Agent
-        {view && <span className={`pill ${scripted ? "fake" : "selected"}`}>{scripted ? "SCRIPTED · no LLM" : `${view.thread.provider} · ${view.thread.model}`}</span>}
+        {view && <span className={`pill ${scripted ? "fake" : "selected"}`}>{scripted ? offlineLabel : `${view.thread.provider} · ${view.thread.model}`}</span>}
         <button className="small ghost" onClick={newThread}>New thread</button>
       </div>
       {config && <div className="hint">
-        Default: {config.provider === "scripted" ? "scripted (rule-based stand-in, not an AI)" : `${config.provider} ${config.model}`} ·
+        Default: {config.provider === "scripted" ? "scripted (rule-based stand-in, not an AI)" : config.provider === "replay" ? "replay (hand-authored mock responses, not an AI)" : `${config.provider} ${config.model}`} ·
         LLM spend ${config.spent_usd.toFixed(4)} / ${config.budget_usd.toFixed(2)} cap{config.budget_usd === 0 ? " (live calls blocked)" : ""}
       </div>}
       {acct && Object.keys(acct.calculated).some((k) => k !== "none") && (
@@ -76,15 +77,16 @@ export default function AgentPanel({ projectId, focusShot, onStateChanged, onOpe
         <>
           <div className="agent-log" ref={logRef}>
             {entries.map((e) => e.msg ? <Message key={e.key} m={e.msg} /> : <Call key={e.key} c={e.call!} onOpenShot={onOpenShot} />)}
-            {!entries.length && <p className="muted">Ask the agent to apply feedback to the open shot.</p>}
+            {!entries.length && <p className="muted">Ask the agent to draft a film plan, prepare assets, or apply feedback to the open shot.</p>}
           </div>
           <div className="agent-input">
             <div className="hint">Focus: {focusShot ? `${focusShot.title} (${focusShot.id})` : "no shot open"}</div>
-            <textarea rows={2} value={text} placeholder={focusShot ? `Apply the latest feedback to shot ${focusShot.id}` : "Open a shot first"}
+            <textarea rows={2} value={text} placeholder={focusShot ? `Apply the latest feedback to shot ${focusShot.id}` : "Ask about the project: plan, assets…"}
                       onChange={(e) => setText(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); }} />
             <div className="actions">
-              {focusShot && !text && <button className="small ghost" onClick={() => setText(`Apply the latest feedback to shot ${focusShot.id}.`)}>Use suggestion</button>}
+              {!text && <button className="small ghost" onClick={() => setText(focusShot ? `Apply the latest feedback to shot ${focusShot.id}.`
+                : "Draft a short-film plan from the brief: a compact treatment and about three shots.")}>Use suggestion</button>}
               <button className="primary small" disabled={busy || !text.trim()} onClick={send}>{busy ? "Working…" : "Send"}</button>
             </div>
           </div>
