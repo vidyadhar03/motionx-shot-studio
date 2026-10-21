@@ -244,3 +244,9 @@ The app enforces this through `.env`: `STUDIO_MAX_PAID_ATTEMPTS=1` and `STUDIO_B
 - @boy v1 (`av_0460b8984f4048aa`, generation `agn_cf547c26feeb4ddc`) was **accepted by the owner**. It is now chosen and current, and pinned as Image 1 in s1–s3.
 - Video stays blocked: @underpass v1 is still mood reference only.
 - The revised location "Quiet Underpass Shelter at Midnight.png" was **not found** in Downloads, Desktop or Pictures. The owner has been asked to supply it.
+
+**Final location and first video proposal, no model call (2026-10-21):**
+- **@underpass v2** imported unchanged from the owner's "Deserted Flyover Road at Night.png" (PNG 1672×941, sha256 `cea3e484…`, C2PA ChatGPT/gpt-image 2026-10-21; provenance recorded). Approved by the owner as the final location; current, and pinned to s1–s3 after @boy v1. v1 stays mood reference only.
+- **Shot s1, revision 4** (author `user`): the owner's direction for the action (squats on open soil right of the belongings, in front of the large pillar, phone held vertically, warm amber light, subtle phone glow, no readable text) and the sound (ambient traffic, no music).
+- **Pending video proposal `prp_6cb6c0391728447b`**: `h3_reference`, 5 s, 768P, 16:9, seed 2995113552. Image 1 = @boy v1, Image 2 = @underpass v2. **135.78 credits** estimated. Paid route, `created_by` user, **not approved or submitted**.
+- `.env` video caps were set from 140/1 to **0/0**, so every cap is 0 by default.
