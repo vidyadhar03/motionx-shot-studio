@@ -364,3 +364,39 @@ The folder's cumulative live total is now 11 requests and $0.052907 calculated. 
 | **Total** | 11,470 | 1,242 | 0 | 0 | – | **$0.013260** |
 
 The folder's cumulative live total is now 15 requests and $0.066167 calculated. Nothing is confirmed by billing.
+
+## Paid video run 3 (shot 1, take 2): 2026-10-21 17:19:54–17:23:27 UTC, `data-flyover-live`
+
+**Authorisation:** the owner approved proposal `prp_8e79a0284b5f4d6a` unchanged for one attempt: ≤ 140 additional credits, no retries, no resubmission, no LLM or image calls, shots 2–3 on hold.
+
+**Pre-flight (all passed before submitting).** Checked that:
+- the proposal was pending and fresh;
+- it was linked to take 1;
+- paid route, `h3_reference`;
+- 5 s / 768P / 16:9 / seed 2995113552;
+- the references were @boy v2 + @underpass v2;
+- the estimate was 135.78 ≤ 140;
+- the ledger before held take 1 only (135.78, 1 attempt);
+- the allowance was exactly 140 / 1 attempt (cumulative caps 275.78 / 2 for this process only);
+- no takes were in flight;
+- the balance was 778.01.
+
+**Result.**
+- **Succeeded**: take `tk_7cc753c5e4954823` (#2), parent `tk_ad8bfc16048345d0`, job `92d91766-c95d-45dd-8d94-dc280961a5ef`.
+- Timing: submitted 17:19:58, generated 17:23:24. **209.0 s** end to end.
+- Output: MP4 1344×768 at 24 fps, 124 frames, AAC stereo, 5.17 s, sha256 `6a6a83e7…`.
+- 1 submission, no retries.
+
+**Charge.**
+- Balance 778.01 → 642.23, so **observed 135.78 credits** (= the estimate).
+- Ledger: 2 rows, 271.56 credits in this folder.
+
+**Checks and state.**
+- The key wasn't found in any output.
+- ComfyUI stopped; every cap is 0 by default.
+- Take 2 is **unreviewed and unselected**; take 1 is unchanged.
+
+**Offline analysis (frames only, no playback judgement).**
+- **Camera:** phase correlation over all 124 frames: take 1 shows 0 px shift (locked off). Take 2 shows a continuous leftward image shift (camera moving right): background −103 px and foreground −187 px over 5 s at 448 px width, so about 1.8× parallax.
+- **Rickshaw:** visible in sampled frames from about 2.2 s, entering on the left on the background road and passing behind shrubs.
+- **Glow:** the face light is more even than in take 1 in the sampled crops, with a bright hotspot on the hand and phone from about 2 s.
