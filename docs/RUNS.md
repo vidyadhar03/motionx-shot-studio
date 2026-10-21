@@ -59,6 +59,7 @@ The app enforces this through `.env`: `STUDIO_MAX_PAID_ATTEMPTS=1` and `STUDIO_B
 | 2026-10-21, demo Stage A (planning only) | Gemini `gemini-3.8-flash` only, one session, ≤ 8 model requests, $0.15 estimate-based cap, 4,096 output tokens, thinking `low`, no retries/fallback/cap increases, no image or video, no plan approval | **Used: 6 requests, calculated $0.033141.** Live calls disabled again (defaults: scripted, budget 0, 0 requests) pending review |
 | 2026-10-21, shot-1 revision session | Gemini `gemini-3.8-flash` only, one session, ≤ 8 new model requests, $0.10 new estimate-based cap (cumulative caps 14 requests / $0.133141 in this folder), 4,096 output tokens, thinking `low`, no retries/fallback/cap increases, no image/video | **Used: 5 requests, calculated $0.019766.** Live calls disabled again |
 | 2026-10-21, shot-1 follow-up (M7 controls) | Gemini `gemini-3.8-flash` only, one session, ≤ 8 new requests, $0.10 new estimate-based cap (cumulative 19 / $0.152907), no retries/fallback/cap increases, no image/video | **Used: 4 requests, calculated $0.013260.** Live calls disabled again |
+| 2026-10-21, shot-2 first-take preparation | Gemini `gemini-3.8-flash` only, one session, ≤ 8 new requests, $0.10 new estimate-based cap (cumulative 23 / $0.166167), no retries/fallback/cap increases, no image/video | **Used: 6 requests, calculated $0.026737.** Live calls disabled again |
 
 ### Live run 1: 2026-10-20 ~03:18–03:19 local, isolated project `data-live1` (synthetic assets, fake video adapter)
 
@@ -400,3 +401,42 @@ The folder's cumulative live total is now 15 requests and $0.066167 calculated. 
 - **Camera:** phase correlation over all 124 frames: take 1 shows 0 px shift (locked off). Take 2 shows a continuous leftward image shift (camera moving right): background −103 px and foreground −187 px over 5 s at 448 px width, so about 1.8× parallax.
 - **Rickshaw:** visible in sampled frames from about 2.2 s, entering on the left on the background road and passing behind shrubs.
 - **Glow:** the face light is more even than in take 1 in the sampled crops, with a bright hotspot on the hand and phone from about 2 s.
+
+### Owner approval of shot 1, and live run 5 (shot-2 first take): 2026-10-21 17:56:59–17:57:39 UTC, `data-flyover-live`
+
+**Shot 1 (no model call).**
+- Take 2 `tk_7cc753c5e4954823` approved by the owner and selected.
+- Shot 1 locked (revision 8).
+- Take 1 kept: rejected, 6 feedback notes.
+
+**Session.**
+- 6 requests, 10 tool calls, stop = model finished.
+- Calls:
+  - `read` /plan, /decisions, the skill, shot 2, shot 1's take-2 record, @boy v2, @underpass v2;
+  - `write` shot 2 rev 4 → 5 (warning: camera_detail restated push_in) → rev 6 (warning fixed);
+  - `propose_generation` → **`prp_331a952a10824988`**: pending, no parent take (shot 2's first take).
+
+**Changes (revision 6 vs 4).**
+- `action` reworded: side view, squatting on the soil, phone vertical in portrait, gaze down; the lighting prose removed.
+- `camera_detail` rewritten.
+- `lighting_detail` added.
+- `audio` simplified.
+- Unchanged: medium → medium_close push_in, `low_key_night`, depth of field unset, references @boy v2 + @underpass v2.
+
+**Proposal.**
+- `h3_reference`, 5 s, 768P, 16:9, seed 2738041485 (random: shot 2 has no locked seed).
+- **135.78 credits** estimated; not approved; video caps 0.
+
+**Usage.**
+
+| Request | Input | Output | Thought | Tool use | Pre-call estimate | Calculated |
+|---|---|---|---|---|---|---|
+| 1 | 2,662 | 83 | 0 | 0 | $0.0328 | $0.002308 |
+| 2 | 2,769 | 78 | 0 | 0 | $0.0377 | $0.002369 |
+| 3 | 5,045 | 248 | 0 | 0 | $0.0411 | $0.004714 |
+| 4 | 5,299 | 70 | 0 | 0 | $0.0418 | $0.004237 |
+| 5 | 5,375 | 99 | 0 | 0 | $0.0420 | $0.004403 |
+| 6 | 5,483 | 1,225 | 0 | 0 | $0.0427 | $0.008706 |
+| **Total** | 26,633 | 1,803 | 0 | 0 | – | **$0.026737** |
+
+The folder's cumulative live total is now 21 requests and $0.092904 calculated. Nothing is confirmed by billing.
