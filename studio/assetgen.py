@@ -200,13 +200,14 @@ class AssetGenerations:
         req = self.db.one("SELECT * FROM asset_requirements WHERE project_id=? AND handle=?", g["project_id"], g["handle"])
         arow = self.db.one("SELECT id FROM assets WHERE project_id=? AND handle=?", g["project_id"], g["handle"])
         desc = (req or {}).get("description") or ""
+        prov = f"generated in this app: {g['settings'].get('title', g['workflow_id'])} (generation {gid})"
         if arow:
             asset = self.ops.add_asset_version(arow["id"], description=desc or None, media_sha=rec.sha256,
-                                               origin="generated", generation_id=gid)
+                                               origin="generated", generation_id=gid, provenance=prov)
         else:
             asset = self.ops.create_generated_asset(g["project_id"], kind=req["kind"], name=req["name"],
                                                     handle=g["handle"], description=desc, media_sha=rec.sha256,
-                                                    generation_id=gid)
+                                                    generation_id=gid, provenance=prov)
         av = next(v for v in asset["versions"] if v["generation_id"] == gid)
         self._set(gid, ("running",), status="succeeded", output_sha=rec.sha256, asset_version_id=av["id"],
                   finished_at=now())

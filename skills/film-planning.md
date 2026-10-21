@@ -33,14 +33,19 @@ If the brief is ambiguous about something a shot depends on, ask instead of gues
 
 ## 4. Assets
 List only what the shots need: characters, locations, and a prop only when a shot shows it closely.
+**Reuse what exists:** if `list /assets` already has the place or person, use that handle with `source: "upload"`,
+describe it as its image shows it, and never plan to generate it again. Look at its image (`read /assets/{handle}/v{n}`)
+and its `provenance`: a supplied AI-generated stand-in is not documentary evidence, so don't present its details as
+observed. If the person defers a prop, describe it in the `action` instead of listing an asset.
 For each: `handle`, `kind`, `name`, `description` (what must stay consistent), `source`, `required`,
 and `image_prompt`.
 - `source: "upload"` for real places or things the person can photograph or already has; `"generate"`
   for fictional people; `"either"` when both work. Upload is never worse than generation for a real
   location.
 - `image_prompt` is a reference image, not a film still:
-  - character: one fictional person, full body, facing camera, neutral pose, plain mid-grey
-    background, soft even light, photorealistic, no text/logos;
+  - character: one fictional person, full body, facing camera, neutral pose, plain background,
+    photorealistic, no text/logos; soft even light, or the project's lighting (e.g. night) with enough
+    fill to keep face and clothing readable;
   - location: an empty plate of the place, eye level, no people, no readable signs;
   - prop: the object alone on a plain surface.
   Describe appearance concretely (age range, build, hair, clothing condition and colours). Keep all

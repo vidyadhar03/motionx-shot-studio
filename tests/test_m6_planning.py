@@ -255,3 +255,27 @@ def test_http_routes_accept_json_bodies(tmp_path):
         b = c.post("/api/agent/billing", json={"provider": "gemini", "period": "2026-10", "amount_usd": 0.01,
                                                "source": "console"})
         assert b.status_code == 201
+
+
+def test_supplied_png_is_stored_byte_for_byte_with_provenance_kept_out_of_prompts(world: World):
+    import hashlib
+    import struct
+    import zlib
+    raw = png(1448, 1086)
+    # Insert an ancillary chunk (like C2PA's caBX) before IEND: it must survive the import untouched.
+    body = b"c2pa-manifest-bytes"
+    chunk = struct.pack(">I", len(body)) + b"caBX" + body + struct.pack(">I", zlib.crc32(b"caBX" + body))
+    data = raw[:-12] + chunk + raw[-12:]
+    rec = world.media.put_image(data, "Deserted Flyover Shelter at Night.png")
+    assert rec.sha256 == hashlib.sha256(data).hexdigest() and rec.mime == "image/png"
+    assert world.media.path(rec).read_bytes() == data
+    shot = world.shot(mode="reference", start_frame_sha=None, aspect_ratio="16:9")
+    a = world.ops.create_asset(shot["project_id"], kind="location", name="Flyover", handle="underpass",
+                               description="night flyover", media_sha=rec.sha256,
+                               provenance="User-supplied AI-generated image; not a photograph of the incident")
+    world.ops.update_shot(shot["id"], {"refs": [{"asset_version_id": a["versions"][0]["id"]}]}, 1)
+    prop = world.service.create_proposal(shot["id"])
+    assert "AI-generated" not in prop["resolved_prompt"]
+    take, _ = world.service.approve(prop["id"])
+    ref = next(i for i in world.ops.get_take(take["id"])["snapshot"]["inputs"] if i["role"] == "reference")
+    assert ref["provenance"].startswith("User-supplied AI-generated") and ref["sha256"] == rec.sha256

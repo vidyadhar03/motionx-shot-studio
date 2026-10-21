@@ -218,7 +218,7 @@ class Ops:
         out = []
         for i, r in enumerate(json.loads(refs_json or "[]"), 1):
             row = self.db.one(
-                "SELECT v.id AS asset_version_id, v.version, v.description, v.media_sha, a.id AS asset_id, "
+                "SELECT v.id AS asset_version_id, v.version, v.description, v.media_sha, v.provenance, a.id AS asset_id, "
                 "a.kind, a.name, a.handle, a.current_version AS latest_version, m.mime, m.width, m.height "
                 "FROM asset_versions v JOIN assets a ON a.id=v.asset_id JOIN media m ON m.sha256=v.media_sha "
                 "WHERE v.id=?", r["asset_version_id"])
@@ -277,7 +277,7 @@ class Ops:
 
     # -- assets (Character / Location / Prop) with immutable versions -------------------------
     def create_asset(self, pid: str, *, kind: str, name: str, handle: str, description: str,
-                     media_sha: str) -> dict:
+                     media_sha: str, provenance: str = "") -> dict:
         self.get_project(pid)
         if kind not in ASSET_KINDS:
             raise ValueError(f"kind must be one of {', '.join(ASSET_KINDS)}")
@@ -291,12 +291,13 @@ class Ops:
                 raise ConflictError(f"@{handle} already exists in this project")
             c.execute("INSERT INTO assets(id,project_id,kind,name,handle,current_version,created_at) "
                       "VALUES (?,?,?,?,?,1,?)", (aid, pid, kind, name.strip(), handle, ts))
-            c.execute("INSERT INTO asset_versions(id,asset_id,version,description,media_sha,created_at) "
-                      "VALUES (?,?,?,?,?,?)", (new_id("av"), aid, 1, description.strip(), media_sha, ts))
+            c.execute("INSERT INTO asset_versions(id,asset_id,version,description,media_sha,created_at,provenance) "
+                      "VALUES (?,?,?,?,?,?,?)", (new_id("av"), aid, 1, description.strip(), media_sha, ts,
+                                                 provenance.strip()[:500]))
         return self.get_asset(aid)
 
     def add_asset_version(self, aid: str, *, description: str | None = None, media_sha: str | None = None,
-                          origin: str = "upload", generation_id: str | None = None) -> dict:
+                          origin: str = "upload", generation_id: str | None = None, provenance: str = "") -> dict:
         """Never edits an existing version. Shots keep pointing at the version they pinned until
         someone explicitly updates the shot, so earlier takes' inputs stay true. An uploaded version
         becomes current; a generated one waits until a person chooses it (choose_version)."""
@@ -312,14 +313,15 @@ class Ops:
             raise ValueError("nothing changed: give a new image or a new description")
         with self.db.tx(immediate=True) as c:
             n = (c.execute("SELECT MAX(version) AS v FROM asset_versions WHERE asset_id=?", (aid,)).fetchone()["v"] or 0) + 1
-            c.execute("INSERT INTO asset_versions(id,asset_id,version,description,media_sha,created_at,origin,generation_id) "
-                      "VALUES (?,?,?,?,?,?,?,?)", (new_id("av"), aid, n, desc, sha, now(), origin, generation_id))
+            c.execute("INSERT INTO asset_versions(id,asset_id,version,description,media_sha,created_at,origin,generation_id,"
+                      "provenance) VALUES (?,?,?,?,?,?,?,?,?)",
+                      (new_id("av"), aid, n, desc, sha, now(), origin, generation_id, provenance.strip()[:500]))
             if origin == "upload":
                 c.execute("UPDATE assets SET current_version=? WHERE id=?", (n, aid))
         return self.get_asset(aid)
 
     def create_generated_asset(self, pid: str, *, kind: str, name: str, handle: str, description: str,
-                               media_sha: str, generation_id: str) -> dict:
+                               media_sha: str, generation_id: str, provenance: str = "") -> dict:
         """First version of an asset that so far only existed as a plan requirement. No version is current
         until a person chooses one."""
         if kind not in ASSET_KINDS:
@@ -331,9 +333,9 @@ class Ops:
                 raise ConflictError(f"@{handle} already exists in this project")
             c.execute("INSERT INTO assets(id,project_id,kind,name,handle,current_version,created_at) "
                       "VALUES (?,?,?,?,?,0,?)", (aid, pid, kind, name.strip(), handle, ts))
-            c.execute("INSERT INTO asset_versions(id,asset_id,version,description,media_sha,created_at,origin,generation_id) "
-                      "VALUES (?,?,1,?,?,?,'generated',?)", (new_id("av"), aid, description.strip(), media_sha, ts,
-                                                             generation_id))
+            c.execute("INSERT INTO asset_versions(id,asset_id,version,description,media_sha,created_at,origin,generation_id,"
+                      "provenance) VALUES (?,?,1,?,?,?,'generated',?,?)",
+                      (new_id("av"), aid, description.strip(), media_sha, ts, generation_id, provenance))
         return self.get_asset(aid)
 
     @staticmethod

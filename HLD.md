@@ -422,7 +422,7 @@ Copying about 600 lines of patterns is cheaper and safer than untangling any of 
 | D1 | Further paid generation (e.g. the first real reference-to-video take, a real two-take revision) | none authorised; paid video and image caps default to 0. Staged plan with separate caps: `docs/DEMO_APPROVAL_BRIEF.md` | before the demo |
 | D2 | First live agent run: Gemini key (`GEMINI_API_KEY`), model, and an LLM spend cap (`STUDIO_AGENT_BUDGET_USD`, default 0 = blocked) | run 1 done (2026-10-20); further runs not authorised. Staged plan: `docs/DEMO_APPROVAL_BRIEF.md` | before the demo |
 | D3 | Public repo owner/name and licence | `motionx-shot-studio`, MIT (matches comfy-sdk and the templates) | before publishing, Oct 28 |
-| D4 | Demo material: which characters, locations and frames we have rights to show (no real likenesses without consent, no private MotionX footage) | "Under the Flyover": the location photo is the owner's to supply (missing so far); the fictional boy and the phone are generated only after approval; prompts in the demo brief | Oct 24 |
+| D4 | Demo material: which characters, locations and frames we have rights to show (no real likenesses without consent, no private MotionX footage) | "Under the Flyover": location = the owner's supplied AI-generated image (imported with provenance; mismatches with the brief reported, not edited); the fictional boy is generated only after approval; phone deferred | Oct 24 |
 | D5 | Also enter **Open Weights Only** via the native H3 I2V template on Cloud? (licence for open-weights H3 on Cloud is UNVERIFIED) | no. Main category plus the MiniMax H3 bonus | Oct 26 |
 
 ## 11. Idea → plan → asset preparation (M6, 2026-10-21)
@@ -468,6 +468,7 @@ Copying about 600 lines of patterns is cheaper and safer than untangling any of 
   - The agent may **propose** (`propose_generation` with `asset` + `prompt`). Only the person's API route approves.
   - A run submits once (idempotency key = generation id) and polls. It then saves the image as an **unreviewed** asset version with `origin='generated'`, which does **not** become current.
   - A generation found in `submitting` at startup becomes `submission_unknown` and is never resubmitted.
+- **Provenance:** each version records its source (e.g. "user-supplied AI-generated image; not a photograph of the incident"). It stays out of prompts and is carried into take snapshots and export manifests. Uploads are stored byte-for-byte, so embedded content credentials (C2PA) are kept.
 - **Choose (human only):**
   - It makes a version current.
   - Optionally, it pins that version into the planned shots that list the asset, in the plan's reference order (character, location, props).
@@ -505,7 +506,8 @@ Facts below come from the installed templates and the ComfyUI 0.42.1 node source
   - new read paths: `/plan`, `/plan/revisions/{n}`, `/preparation`, `/image-workflow`;
   - `write /plan` takes the whole plan plus `expected_revision`;
   - `propose_generation` also accepts `asset` + `prompt`, optionally with `references` and `size_preset`;
-  - no tool approves plans or generations, or chooses versions.
+  - no tool approves plans or generations, or chooses versions;
+  - the agent can propose an asset image only for a requirement of an **approved** plan, and never for one marked `upload`.
 - **Skill** `skills/film-planning.md` works for any brief:
   - keep what was observed separate from what was added;
   - guardrails: no invented backstory, no causal claims, fictional people, dignity, no brands or readable text;

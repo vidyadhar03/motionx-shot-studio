@@ -267,9 +267,18 @@ A fresh `git clone` of commit `510696e` into an empty directory. No `.env`, `dat
 | Image workflow | Seedream 5.0 Flash via `ByteDanceSeedreamNodeV3` (0–10 refs, 1K–2K presets), $0.02574/image from the ComfyUI 0.42.1 price badge (≈ 5.43 credits). Graphs for 0/2/10 refs VALID under `validate_prompt` offline. Separate image caps, default 0 |
 | Agent | Same four tools; `/plan`, `/preparation`, `/image-workflow`; `propose_generation` for asset images; no approve/choose tool. New brief-agnostic skill `film-planning`. Replay provider for labelled mocks |
 | Framing | Static/pan/tilt or a reversed push/pull with an end framing are warnings; the prompt credits the subject's movement. Only an end framing without a start is refused |
-| Demo | "Under the Flyover" (`demo/flyover/`, `scripts/demo.py`). Rehearsed: idea → mocked plan → approval → location upload (labelled placeholder: no photo supplied) → mocked image proposals → approve (FAKE images) → choose → mocked first-video proposal, **left pending** |
+| Demo | "Under the Flyover" (`demo/flyover/`, `scripts/demo.py`). Rehearsed: idea + supplied location → mocked plan → approval → mocked image proposals → approve (FAKE images) → choose → mocked first-video proposal, **left pending**. Revised the same day after the owner supplied the location: night throughout, @phone deferred, first video @boy + @underpass only (see below) |
 | Fixed on the way | The M4 "confirm billing" HTTP route always returned 422 (its body model was nested in `create_app`); fixed with a regression test. Asset UI used the newest version as "current"; it now uses the chosen one. Agent input no longer says "Open a shot first" |
 | Tests | 143 pass (new: plan revisions/approval, invalid plans, warnings, image approval and review, upload/generate coexistence, ref order, video-flow compatibility, separate image caps, pure image graphs, HTTP bodies, mocked agent journey, agent can't approve) |
+
+**Location supplied (2026-10-21).**
+- **Import:** the owner's `Deserted Flyover Shelter at Night.png` was imported byte-for-byte as @underpass v1 (sha256 `f0aca6dc…`). C2PA identifies it as ChatGPT/gpt-image output, so it's recorded as a user-supplied AI-generated stand-in, not a photograph. The original is untouched.
+- **New `provenance` field on asset versions:** not used in prompts; carried into take snapshots and export manifests.
+- **Mismatches with the brief** (not edited): a tarp lean-to, a concrete kerb instead of a soil bed, more belongings, readable real names (Raheja Mindspace, Inorbit), no U-turn.
+- **Night correction:** the brief, direction and decisions now say night, as do the mock plan and the @boy prompt. Location generation and @phone were removed from spending.
+- **Agent guard:** the agent can propose asset images only for requirements of an approved plan, and never for an asset to be uploaded.
+- **Stage A data dir** `data-flyover-live` is seeded locally.
+- **Tests:** 145 pass.
 
 **Not verified:** any live model behaviour (plan quality, nested tool schema on Gemini, Seedream output or content-policy handling, H3 with these references), and real image charges.
 

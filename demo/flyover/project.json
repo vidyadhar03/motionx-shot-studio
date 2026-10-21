@@ -1,21 +1,28 @@
 {
-  "label": "Demo project data: the brief is the project owner's own words; nothing here is model output.",
+  "label": "Demo project data: the brief and decisions are the project owner's; nothing here is model output.",
   "name": "Under the Flyover",
-  "brief": "While travelling in Hyderabad, I saw a homeless child squatting beneath a flyover, wearing dirty, torn clothes and deeply absorbed in scrolling reels on a smartphone. The contrast disturbed me. I want to explore that moment through a short, realistic film. The location is beneath a flyover at a U-turn, on a raised planting bed containing soil, with a few bags, covers and basic cooking utensils, not a tent. Use a fictional child. Distinguish the observed moment from creative additions; do not invent a backstory or assert that scrolling caused his poverty.",
+  "brief": "While travelling in Hyderabad at night, I saw a homeless child squatting beneath a flyover, wearing dirty, torn clothes and deeply absorbed in scrolling reels on a smartphone. The contrast disturbed me. I want to explore that moment through a short, realistic film. The location is beneath a flyover at a U-turn, on a raised planting bed containing soil, with a few bags, covers and basic cooking utensils, not a tent. Use a fictional child. Distinguish the observed moment from creative additions; do not invent a backstory or assert that scrolling caused his poverty. The location reference @underpass is a user-supplied AI-generated image, not a photograph of the actual incident; use its night lighting as the visual reference.",
   "direction": {
     "tone": "observational realism, restrained",
-    "palette": "natural daylight; concrete greys and dust",
+    "palette": "night: warm sodium streetlight glancing off concrete pillars and asphalt, deep shadow under the flyover, cool blue-black sky",
     "notes": "no music; no on-screen text or logos"
   },
   "decisions": [
     "The child is fictional and must not resemble any identifiable real child.",
     "Keep the observed moment separate from creative additions; no invented backstory.",
     "Do not suggest that scrolling, or the phone, caused his poverty.",
-    "Location: beneath a flyover at a U-turn, on a raised planting bed of soil with a few bags, covers and basic cooking utensils; not a tent."
+    "Location: beneath a flyover at a U-turn, on a raised planting bed of soil with a few bags, covers and basic cooking utensils; not a tent.",
+    "Night. The supplied @underpass image (AI-generated, not a photo of the incident) is the lighting reference.",
+    "The first video uses only @boy and @underpass; the smartphone is described in the action (a separate phone asset is deferred)."
   ],
-  "location_upload": {
+  "location": {
     "handle": "underpass",
-    "file_name": "underpass.jpg",
-    "note": "Put your own photo of the location in this folder as underpass.jpg (or .png). None was supplied, so it is 'missing'."
+    "kind": "location",
+    "name": "Flyover (night)",
+    "file": "underpass.png",
+    "original_name": "Deserted Flyover Shelter at Night.png",
+    "sha256": "f0aca6dcd18494b47f9281a7ebdf0e83c2f3421a5729d6e742853c25f49aac6a",
+    "description": "Night beneath a concrete flyover on round pillars: a few bags, bedding and steel cooking pots at the base of a pillar by the roadside; warm sodium streetlight, deep shadow, the road beside it.",
+    "provenance": "User-supplied AI-generated image (C2PA credentials: ChatGPT / OpenAI gpt-image, created 2026-10-20); not a photograph of the actual incident. Imported unchanged from 'Deserted Flyover Shelter at Night.png' (sha256 f0aca6dc…)."
   }
 }

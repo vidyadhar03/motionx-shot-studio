@@ -20,6 +20,17 @@ def _world(tmp_path) -> World:
     return World(tmp_path, STUDIO_AGENT_PROVIDER="replay", STUDIO_AGENT_REPLAY_FILE=str(DEMO / "agent_mock.json"))
 
 
+LOC = PROJECT["location"]
+
+
+def _project_with_location(w: World) -> str:
+    """As `demo.py seed` does: brief + the owner's supplied location (a stand-in image here), with provenance."""
+    pid = w.ops.create_project(PROJECT["name"], PROJECT["brief"], PROJECT["direction"])["id"]
+    w.ops.create_asset(pid, kind=LOC["kind"], name=LOC["name"], handle=LOC["handle"], description=LOC["description"],
+                       media_sha=w.media.put_image(png(1448, 1086)).sha256, provenance=LOC["provenance"])
+    return pid
+
+
 def _send(w: World, pid: str, text: str) -> tuple[str, list[dict], str]:
     ag = AgentRunner(w.settings, w.ops, w.service, w.media, AgentStore(w.db))
     tid = ag.create_thread(pid)["id"]
@@ -30,15 +41,19 @@ def _send(w: World, pid: str, text: str) -> tuple[str, list[dict], str]:
 
 def test_mocked_agent_drafts_a_plan_that_waits_for_a_person(tmp_path):
     w = _world(tmp_path)
-    pid = w.ops.create_project(PROJECT["name"], PROJECT["brief"], PROJECT["direction"])["id"]
+    pid = _project_with_location(w)
     _, calls, final = _send(w, pid, "Draft a short-film plan from the brief.")
-    assert [c["name"] for c in calls] == ["read", "read", "read", "list", "write"]
+    assert [c["name"] for c in calls] == ["read", "read", "read", "list", "read", "write"]
     assert all(c["status"] == "done" for c in calls)
     assert final.startswith("[Mocked agent") and "can't approve" in final
     plan = Planning(w.db, w.ops).get_plan(pid)
     assert plan["status"] == "draft" and plan["revisions"][0]["author"] == "agent"
     c = plan["content"]
-    assert len(c["shots"]) == 3 and {a["handle"] for a in c["assets"]} == {"boy", "underpass", "phone"}
+    assert len(c["shots"]) == 3 and [a["handle"] for a in c["assets"]] == ["boy", "underpass"]
+    assert all(sh["assets"] == ["boy", "underpass"] and sh["lighting"] == "low_key_night" for sh in c["shots"])
+    assert "It was night." in c["observed"] and not any("daylight" in x for x in c["creative_additions"])
+    assert "smartphone" in c["shots"][1]["action"]
+    assert w.db.all("SELECT * FROM asset_generations") == []              # Stage A proposes nothing
     assert c["observed"] and c["creative_additions"] and any("causal" in g for g in c["guardrails"])
     assert w.ops.list_shots(pid) == []                                 # nothing created before approval
 
@@ -55,36 +70,53 @@ def test_agent_has_no_way_to_approve_plans_or_generations(tmp_path):
 
 def test_full_mocked_journey_reaches_a_pending_first_video_proposal(tmp_path):
     w = _world(tmp_path)
-    pid = w.ops.create_project(PROJECT["name"], PROJECT["brief"], PROJECT["direction"])["id"]
+    pid = _project_with_location(w)
     pl = Planning(w.db, w.ops)
     _send(w, pid, "Draft a short-film plan from the brief.")
     plan = pl.get_plan(pid)
-    pl.approve(plan["id"], plan["revision"])
-    # Agent proposes images only for 'generate' assets; nothing runs
+    out = pl.approve(plan["id"], plan["revision"])
+    assert all(c["pinned"] == 1 for c in out["report"]["created_shots"])  # supplied location pinned at approval
+    assert {r["handle"]: r["status"] for r in pl.preparation(pid)["requirements"]} == {"boy": "missing", "underpass": "ready"}
+    # Agent proposes an image only for the 'generate' asset; nothing runs
     _, calls, final = _send(w, pid, "Prepare the assets.")
     props = [c for c in calls if c["name"] == "propose_generation"]
-    assert [c["input"]["asset"] for c in props] == ["boy", "phone"] and "@underpass" in final
-    gens = {g["handle"]: g for g in w.db.all("SELECT * FROM asset_generations WHERE project_id=?", pid)}
-    assert {g["status"] for g in gens.values()} == {"pending"} and all(g["created_by"] == "agent" for g in gens.values())
+    assert [c["input"]["asset"] for c in props] == ["boy"] and "@underpass" in final
+    gens = w.db.all("SELECT * FROM asset_generations WHERE project_id=?", pid)
+    assert [(g["handle"], g["status"], g["created_by"]) for g in gens] == [("boy", "pending", "agent")]
+    assert "at night" in json.loads(gens[0]["request"])["prompt"]
     assert w.adapter.submit_calls == []
-    # Person: upload the location, approve + choose the generated images
     from studio.assetgen import AssetGenerations
     ag = AssetGenerations(w.db, w.ops, w.media, w.adapter, w.settings)
-    loc = w.ops.create_asset(pid, kind="location", name="Flyover U-turn", handle="underpass", description="placeholder",
-                             media_sha=w.media.put_image(png(1424, 800)).sha256)
-    pl.choose_version(loc["versions"][0]["id"])
-    for g in gens.values():
-        ag.approve(g["id"])
-        pl.choose_version(ag.run(g["id"])["asset_version_id"])
-    prep = {r["handle"]: r["status"] for r in pl.preparation(pid)["requirements"]}
-    assert prep == {"boy": "ready", "underpass": "ready", "phone": "ready"}
-    # Agent proposes the first video; it stays pending
+    ag.approve(gens[0]["id"])
+    pl.choose_version(ag.run(gens[0]["id"])["asset_version_id"])
+    assert {r["status"] for r in pl.preparation(pid)["requirements"]} == {"ready"}
+    # Agent proposes the first video; it stays pending, with exactly @boy + @underpass
     _, calls, final = _send(w, pid, "Propose the first video for shot 1.")
     assert calls[-1]["name"] == "propose_generation" and calls[-1]["status"] == "done"
     s1 = w.ops.get_shot(w.ops.list_shots(pid)[0]["id"])
     assert [r["handle"] for r in s1["refs_resolved"]] == ["boy", "underpass"]
     assert s1["proposals"][0]["status"] == "pending" and not s1["takes"]
-    assert "Image 1 is @boy" in s1["proposals"][0]["resolved_prompt"]
+    prompt = s1["proposals"][0]["resolved_prompt"]
+    assert "Image 1 is @boy" in prompt and "Image 2 is @underpass" in prompt and "Low-key night lighting" in prompt
+    assert "AI-generated" not in prompt and "C2PA" not in prompt              # provenance never reaches the model
+
+
+def test_agent_cannot_propose_assets_before_approval_or_for_supplied_ones(tmp_path):
+    w = _world(tmp_path)
+    pid = _project_with_location(w)
+    tools = AgentTools(pid, w.ops, w.service, w.media)
+    ask = lambda h: tools.execute(ToolCall("p", "propose_generation", {"asset": h, "prompt": "x", "note": "n"}))  # noqa: E731
+    assert ask("underpass").is_error and "approved plan" in ask("underpass").content["message"]
+    _send(w, pid, "Draft a short-film plan from the brief.")
+    pl = Planning(w.db, w.ops)
+    plan = pl.get_plan(pid)
+    assert ask("boy").is_error                                          # still a draft
+    pl.approve(plan["id"], plan["revision"])
+    out = ask("underpass")
+    assert out.is_error and "supplied by the person" in out.content["message"]
+    assert not ask("boy").is_error
+    v = tools.execute(ToolCall("r", "read", {"path": "/assets/underpass/v1"}))
+    assert "AI-generated" in v.content["provenance"]
 
 
 def test_replay_mock_stops_honestly_when_a_tool_refuses(tmp_path):

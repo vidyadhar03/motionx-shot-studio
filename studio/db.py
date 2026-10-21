@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS asset_versions (
   created_at TEXT NOT NULL,
   origin TEXT NOT NULL DEFAULT 'upload',          -- upload | generated
   generation_id TEXT,                              -- asset_generations.id when generated
+  provenance TEXT NOT NULL DEFAULT '',             -- where the image came from (never sent to the model)
   UNIQUE (asset_id, version)
 );
 
@@ -394,7 +395,8 @@ class Database:
                   ("locked", "INTEGER NOT NULL DEFAULT 0"),
                   ("end_framing", "TEXT")],
         "takes": [("cancel_requested_at", "TEXT"), ("cancel_outcome", "TEXT")],
-        "asset_versions": [("origin", "TEXT NOT NULL DEFAULT 'upload'"), ("generation_id", "TEXT")],
+        "asset_versions": [("origin", "TEXT NOT NULL DEFAULT 'upload'"), ("generation_id", "TEXT"),
+                           ("provenance", "TEXT NOT NULL DEFAULT ''")],
         "proposals": [("context", "TEXT"), ("context_hash", "TEXT"), ("stale_reason", "TEXT")],
         "agent_usage": [("thought_tokens", "INTEGER NOT NULL DEFAULT 0"), ("pre_estimate_usd", "REAL"),
                         ("raw_usage", "TEXT"), ("calc_method", "TEXT")],

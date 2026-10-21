@@ -77,11 +77,13 @@ class AssetIn(BaseModel):
     handle: str
     description: str = ""
     media_sha: str
+    provenance: str = ""
 
 
 class AssetVersionIn(BaseModel):
     description: str | None = None
     media_sha: str | None = None
+    provenance: str = ""
 
 
 class DecisionIn(BaseModel):
@@ -402,7 +404,7 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     @app.post("/api/projects/{pid}/assets", status_code=201)
     def create_asset(pid: str, body: AssetIn) -> dict:
         return ops.create_asset(pid, kind=body.kind, name=body.name, handle=body.handle,
-                                description=body.description, media_sha=body.media_sha)
+                                description=body.description, media_sha=body.media_sha, provenance=body.provenance)
 
     @app.get("/api/assets/{aid}")
     def get_asset(aid: str) -> dict:
@@ -410,7 +412,8 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
 
     @app.post("/api/assets/{aid}/versions", status_code=201)
     def add_version(aid: str, body: AssetVersionIn) -> dict:
-        return ops.add_asset_version(aid, description=body.description, media_sha=body.media_sha)
+        return ops.add_asset_version(aid, description=body.description, media_sha=body.media_sha,
+                                     provenance=body.provenance)
 
     @app.patch("/api/projects/{pid}")
     def patch_project(pid: str, body: ProjectPatch) -> dict:

@@ -278,6 +278,8 @@ class AgentTools:
             raise NotFoundError(f"@{handle} has no v{n}; it has v1..v{a['current_version']}")
         return ({"handle": a["handle"], "version": v["version"], "asset_version_id": v["id"],
                  "description": v["description"], "is_current": v["version"] == a["current_version"],
+                 "provenance": v.get("provenance") or "not recorded",
+                 "origin": v.get("origin"),
                  "image": f"attached ({v['width']}x{v['height']})"}, [self._image(v["media_sha"])])
 
     def _read_scene(self, scid: str) -> dict:
@@ -401,6 +403,13 @@ class AgentTools:
     def _propose_asset(self, inp: dict) -> dict:
         if not str(inp.get("prompt", "")).strip():
             raise ToolRefused("an image proposal needs the exact prompt")
+        handle = str(inp["asset"]).strip().lstrip("@").lower()
+        req = self.ops.db.one("SELECT source FROM asset_requirements WHERE project_id=? AND handle=?", self.pid, handle)
+        if req is None:
+            # The agent prepares assets only for an APPROVED plan; a person can still generate anything from the UI.
+            raise ToolRefused(f"@{handle} is not a requirement of an approved plan; a person must approve the plan first")
+        if req["source"] == "upload":
+            raise ToolRefused(f"@{handle} is to be supplied by the person (source: upload); don't propose generating it")
         refs = []
         for r in inp.get("references") or []:
             m = re.match(r"^@?([\w-]+)/v(\d+)$", str(r))

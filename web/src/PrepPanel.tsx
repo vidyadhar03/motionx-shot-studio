@@ -48,6 +48,7 @@ export default function PrepPanel({ projectId, refreshKey, onChanged, onError }:
               <div><strong>@{r.handle}</strong> <span className="muted">{r.kind} · {r.required ? "required" : "optional"} · suggested: {r.source}</span>
                 <span className={`pill ${r.status === "ready" ? "ok" : "fake"}`}>{LABEL[r.status]}{r.current ? ` · v${r.current.version}` : ""}</span></div>
               <div className="muted">{r.description}</div>
+              {r.current?.provenance && <div className="hint">Source: {r.current.provenance}</div>}
               {r.shots.length > 0 && <div className="hint">Planned shots: {r.shots.map((s) => `${s.key} ${s.title} (${s.pinned_version ? `pinned v${s.pinned_version}` : "not pinned"})`).join(" · ")}</div>}
               <div className="actions left">
                 <UploadButton req={r} projectId={projectId} onDone={done} onError={onError} />

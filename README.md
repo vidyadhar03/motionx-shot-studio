@@ -104,12 +104,12 @@ One agent loop with four project-scoped tools (`list`, `read`, `write`, `propose
 ## Demo project: "Under the Flyover"
 
 ```bash
-.venv/bin/python scripts/demo.py seed --base http://127.0.0.1:8700        # brief + decisions only
+.venv/bin/python scripts/demo.py seed --base http://127.0.0.1:8700        # brief, decisions, supplied location image
 .venv/bin/python scripts/demo.py rehearse --base http://127.0.0.1:8700    # needs STUDIO_AGENT_PROVIDER=replay (see below)
 ```
 
 `rehearse` runs idea → plan → approval → assets → a **pending** first-video proposal through the HTTP API. It refuses unless the app reports the fake adapter and an offline agent. For the agent turns, start the app with `STUDIO_AGENT_PROVIDER=replay STUDIO_AGENT_REPLAY_FILE=demo/flyover/agent_mock.json`: that file is a hand-authored, labelled mock, not model output.
-- **Location photo:** put yours at `demo/flyover/underpass.jpg`. Without it, the rehearsal uploads a labelled placeholder.
+- **Location image:** `seed` imports `demo/flyover/underpass.png` byte-for-byte, checks its recorded SHA-256 and records its source as `provenance`. In this demo it's a user-supplied AI-generated stand-in, not a photograph. The file is gitignored; without it @underpass shows as missing. Provenance never goes into prompts; it travels with snapshots and exports.
 - **Live plan and caps:** [docs/DEMO_APPROVAL_BRIEF.md](docs/DEMO_APPROVAL_BRIEF.md).
 
 ## Tests

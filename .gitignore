@@ -11,3 +11,7 @@ web/node_modules/
 web/dist/
 .DS_Store
 backups/
+
+# User-supplied reference images (rights/terms are the owner's call; not committed)
+demo/flyover/underpass.*
+demo/flyover/underpass_*

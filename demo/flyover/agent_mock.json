@@ -5,7 +5,7 @@
       "match": "^draft\\b.*\\bplan\\b",
       "turns": [
         {
-          "text": "Reading the brief, the planning skill, decisions and assets.",
+          "text": "Reading the brief, the planning skill, decisions and the existing location asset.",
           "calls": [
             {
               "name": "read",
@@ -30,6 +30,12 @@
               "input": {
                 "path": "/assets"
               }
+            },
+            {
+              "name": "read",
+              "input": {
+                "path": "/assets/underpass/v1"
+              }
             }
           ]
         },
@@ -42,9 +48,10 @@
                 "path": "/plan",
                 "patch": {
                   "title": "Under the Flyover",
-                  "logline": "Beneath a Hyderabad flyover, a boy squats on a strip of soil, absorbed in a phone, while the traffic turns around him.",
-                  "treatment": "Traffic swings through a U-turn beneath a concrete flyover. On a raised planting bed of bare soil in the median, a few bags, plastic covers and cooking utensils mark where someone stays; there is no tent. A boy squats on the soil in dirty, torn clothes, bent over a smartphone, scrolling short videos. The film watches without explaining: the engines and horns of the turning traffic, the thin sound of the reels, the small movement of his thumb. We don't learn who he is or how he came to be here. The last shot stays close on his absorbed face as vehicles keep turning behind him, and leaves the contrast to the audience.",
+                  "logline": "At night beneath a Hyderabad flyover, a boy squats on a strip of soil, absorbed in a phone, while the traffic turns around him.",
+                  "treatment": "Night beneath a concrete flyover. Now and then a vehicle swings through the U-turn, its headlights sliding across the pillars. On a raised planting bed of bare soil at the base of a pillar, a few bags, covers and cooking utensils mark where someone stays; there is no tent. A boy squats on the soil in dirty, torn clothes, bent over a smartphone, scrolling short videos, its glow on his face against the orange streetlight. The film watches without explaining: engines echoing under the deck, the thin sound of the reels, the small movement of his thumb. We don't learn who he is or how he came to be here. The last shot stays close on his absorbed face as headlights keep passing behind him, and leaves the contrast to the audience.",
                   "observed": [
+                    "It was night.",
                     "A homeless child squatting beneath a flyover in Hyderabad.",
                     "The child wore dirty, torn clothes.",
                     "He was deeply absorbed in scrolling reels on a smartphone.",
@@ -54,12 +61,12 @@
                   ],
                   "creative_additions": [
                     "The boy is fictional: his age (about 10), build, hair and clothing colours are invented.",
-                    "Late-afternoon daylight in the flyover's shade.",
-                    "Sound design: turning traffic, engines, occasional horns, the phone's thin reel audio; no music.",
+                    "Lighting follows the supplied AI-generated location image: warm sodium streetlight glancing off concrete pillars and asphalt, deep shadow under the flyover, cool blue-black sky.",
+                    "The phone's cold screen glow on his face.",
+                    "Occasional vehicles turning, headlights sweeping the pillars; sound design without music.",
                     "Camera: a static wide, a slow push-in, a static close-up; shot order and durations.",
-                    "Gestures: elbows on knees, thumb flicking up the screen.",
-                    "The phone's colours flickering faintly on his face in the shade; screen content never readable.",
-                    "The specific utensils (a blackened pot, a pan, steel plates) and plastic covers."
+                    "Gestures: elbows on knees, thumb flicking up the screen; the phone is old, in a scuffed case.",
+                    "Screen content is never readable."
                   ],
                   "guardrails": [
                     "Fictional child; not based on, and not resembling, any identifiable real child.",
@@ -70,7 +77,7 @@
                     "Observational: no slow motion and no music telling the audience what to feel."
                   ],
                   "scene": {
-                    "name": "1 · Under the flyover, U-turn"
+                    "name": "1 · Under the flyover, U-turn, night"
                   },
                   "assets": [
                     {
@@ -80,38 +87,29 @@
                       "source": "generate",
                       "required": true,
                       "description": "Fictional Indian boy about 10, thin, short untidy black hair, barefoot, faded torn dusty T-shirt and shorts.",
-                      "image_prompt": "Full-body character reference photo of a fictional Indian boy about 10 years old, thin build, short untidy black hair, barefoot, wearing a faded, torn and dusty grey T-shirt and dark blue shorts. Standing straight and facing the camera, arms relaxed, calm neutral expression. Plain mid-grey studio background, soft even light, photorealistic, natural skin texture, sharp focus. Dignified, not posed for pity. No text, no logos, no other people. Portrait 2:3."
+                      "image_prompt": "Full-body character reference photo of a fictional Indian boy about 10 years old, thin build, short untidy black hair, barefoot, wearing a faded, torn and dusty grey T-shirt and dark blue shorts. Standing straight and facing the camera, arms relaxed, calm neutral expression. Photographed at night against a plain dark background under warm sodium-orange streetlight from one side, with soft fill so his face and clothes stay clearly readable; photorealistic, natural skin texture, sharp focus. Dignified, not posed for pity. No text, no logos, no other people. Portrait 2:3."
                     },
                     {
                       "handle": "underpass",
                       "kind": "location",
-                      "name": "Flyover U-turn",
+                      "name": "Flyover (night)",
                       "source": "upload",
                       "required": true,
-                      "description": "Beneath a concrete flyover at a U-turn: raised median planting bed of bare soil with a few bags, plastic covers and basic cooking utensils; no tent.",
-                      "image_prompt": "Eye-level wide photograph beneath a concrete city flyover in Hyderabad, India, at a U-turn: a raised median planting bed of bare brown soil with a few cloth bags, folded plastic covers and basic cooking utensils (a blackened aluminium pot, a pan, steel plates) on it; no tent; no pedestrians; auto-rickshaws, motorbikes and cars turning around the median in the background, motion-blurred; late-afternoon daylight in the flyover's shade; dusty, stained concrete pillars. Photorealistic, natural colour, no readable signs, no logos, no text. 16:9."
-                    },
-                    {
-                      "handle": "phone",
-                      "kind": "prop",
-                      "name": "Phone",
-                      "source": "generate",
-                      "required": false,
-                      "description": "Old, inexpensive smartphone in a scuffed dark plastic case; screen shows only indistinct colour.",
-                      "image_prompt": "Reference photo of an old, inexpensive smartphone in a scuffed dark plastic case, screen on and showing only indistinct bright colours (no app interface, no text, no logos), lying on a plain grey surface, soft even light, photorealistic. Square 1:1."
+                      "description": "Night beneath a concrete flyover on round pillars: a few bags, bedding and steel cooking pots at the base of a pillar by the roadside; warm sodium streetlight, deep shadow, the road beside it.",
+                      "image_prompt": ""
                     }
                   ],
                   "shots": [
                     {
                       "key": "s1",
                       "title": "The U-turn",
-                      "intention": "Establish the place, and how small he is in it.",
-                      "action": "Vehicles swing through the U-turn beneath the flyover. On the raised planting bed of soil in the median, a few bags, plastic covers and cooking utensils sit near @boy, who squats with his head bent over a phone.",
+                      "intention": "Establish the place at night, and how small he is in it.",
+                      "action": "At night beneath the flyover, an occasional vehicle turns through the U-turn, headlights sweeping the pillars. On the raised planting bed of soil at the base of a pillar, a few bags, covers and cooking utensils sit near @boy, who squats with his head bent over an old smartphone, its screen glowing.",
                       "framing": "wide",
                       "camera_move": "static",
-                      "lighting": "natural_day",
+                      "lighting": "low_key_night",
                       "duration_s": 5,
-                      "audio": "Traffic turning and passing under the flyover, engines, an occasional horn; no music.",
+                      "audio": "An occasional vehicle turning, engines echoing under the flyover, a distant horn; no music.",
                       "assets": [
                         "boy",
                         "underpass"
@@ -120,34 +118,32 @@
                     {
                       "key": "s2",
                       "title": "Absorbed",
-                      "intention": "His absorption, set against the moving city.",
-                      "action": "@boy squats on the soil, elbows on knees, thumb flicking up the phone screen; vehicles pass behind him, softly out of focus.",
+                      "intention": "His absorption, set against the city moving past.",
+                      "action": "@boy squats on the soil, elbows on knees, thumb flicking up the screen of an old smartphone in a scuffed case; its cold glow lights his face against the orange streetlight; headlights pass behind him, softly out of focus.",
                       "framing": "medium",
                       "end_framing": "medium_close",
                       "camera_move": "push_in",
                       "camera_detail": "very slow, even pace",
-                      "lighting": "natural_day",
+                      "lighting": "low_key_night",
                       "duration_s": 6,
-                      "audio": "Traffic, slightly softer; the phone's thin reel audio becomes audible; no music.",
+                      "audio": "Engines under the flyover, quieter; the phone's thin reel audio becomes audible; no music.",
                       "assets": [
                         "boy",
-                        "underpass",
-                        "phone"
+                        "underpass"
                       ]
                     },
                     {
                       "key": "s3",
                       "title": "The screen",
                       "intention": "Stay with him; leave the contrast to the audience.",
-                      "action": "Close on @boy's absorbed face, the phone's colours flickering faintly on his skin; he keeps scrolling as vehicles pass, out of focus, behind him.",
+                      "action": "Close on @boy's absorbed face, lit by the phone's shifting screen glow; he keeps scrolling as headlights pass, out of focus, behind him.",
                       "framing": "close_up",
                       "camera_move": "static",
-                      "lighting": "natural_day",
+                      "lighting": "low_key_night",
                       "duration_s": 5,
-                      "audio": "The phone's reel audio, close and thin, over the traffic; a distant horn; no music.",
+                      "audio": "The phone's reel audio, close and thin, over distant traffic; a horn far away; no music.",
                       "assets": [
                         "boy",
-                        "phone",
                         "underpass"
                       ]
                     }
@@ -159,7 +155,7 @@
           ]
         },
         {
-          "text": "Drafted plan revision {{r:t1c0:plan_revision}} (status: {{r:t1c0:status}}). Observed: the six points from your brief, kept separate. Added by me: a fictional boy of about 10, late-afternoon light, sound design without music, the camera choices and the utensil details. Three shots: a static wide of the U-turn (5 s), a slow push-in from medium to medium close-up (6 s), and a static close-up (5 s). Assets: @boy (generate), @underpass (upload your photo; generation is a fallback) and @phone (optional prop). The plan waits for your approval; I can't approve it."
+          "text": "Drafted plan revision {{r:t1c0:plan_revision}} (status: {{r:t1c0:status}}). Observed: the seven points from your brief, kept separate. Added by me: a fictional boy of about 10, the lighting taken from your supplied location image, the phone's glow, occasional vehicles, sound without music and the camera choices. Three night shots, each using only @boy and the existing @underpass: a static wide (5 s), a slow push-in from medium to medium close-up (6 s) and a static close-up (5 s). @underpass already exists, so only @boy needs an image. The plan waits for your approval; I can't approve it."
         }
       ]
     },
@@ -184,30 +180,21 @@
           ]
         },
         {
-          "text": "Proposing images for the assets marked 'generate'.",
+          "text": "Proposing an image for @boy, the only asset marked 'generate'.",
           "calls": [
             {
               "name": "propose_generation",
               "input": {
                 "asset": "boy",
-                "prompt": "Full-body character reference photo of a fictional Indian boy about 10 years old, thin build, short untidy black hair, barefoot, wearing a faded, torn and dusty grey T-shirt and dark blue shorts. Standing straight and facing the camera, arms relaxed, calm neutral expression. Plain mid-grey studio background, soft even light, photorealistic, natural skin texture, sharp focus. Dignified, not posed for pity. No text, no logos, no other people. Portrait 2:3.",
+                "prompt": "Full-body character reference photo of a fictional Indian boy about 10 years old, thin build, short untidy black hair, barefoot, wearing a faded, torn and dusty grey T-shirt and dark blue shorts. Standing straight and facing the camera, arms relaxed, calm neutral expression. Photographed at night against a plain dark background under warm sodium-orange streetlight from one side, with soft fill so his face and clothes stay clearly readable; photorealistic, natural skin texture, sharp focus. Dignified, not posed for pity. No text, no logos, no other people. Portrait 2:3.",
                 "size_preset": "(1K) 832x1248 (2:3)",
                 "note": "Character reference for @boy from the approved plan"
-              }
-            },
-            {
-              "name": "propose_generation",
-              "input": {
-                "asset": "phone",
-                "prompt": "Reference photo of an old, inexpensive smartphone in a scuffed dark plastic case, screen on and showing only indistinct bright colours (no app interface, no text, no logos), lying on a plain grey surface, soft even light, photorealistic. Square 1:1.",
-                "size_preset": "(1K) 1024x1024 (1:1)",
-                "note": "Optional prop reference for @phone"
               }
             }
           ]
         },
         {
-          "text": "Proposed two images, each ~{{r:t1c0:est_credits}} credits on the real route: @boy ({{r:t1c0:asset_generation_id}}) and @phone ({{r:t1c1:asset_generation_id}}). Both wait for your approval, and each result must be chosen by you before a shot uses it. I didn't propose @underpass: the plan asks for your photo of the location."
+          "text": "Proposed one image for @boy ({{r:t1c0:asset_generation_id}}, ~{{r:t1c0:est_credits}} credits on the real route). It waits for your approval, and the result must be chosen by you before a shot uses it. @underpass is your supplied image, so nothing else is needed."
         }
       ]
     },
@@ -255,7 +242,7 @@
           ]
         },
         {
-          "text": "Created pending proposal {{r:t2c0:proposal_id}} for shot 1 (~{{r:t2c0:est_credits}} credits on the real route). It uses the chosen asset versions pinned to the shot. It waits for your approval."
+          "text": "Created pending proposal {{r:t2c0:proposal_id}} for shot 1 (~{{r:t2c0:est_credits}} credits on the real route), with @boy and @underpass pinned. It waits for your approval."
         }
       ]
     }

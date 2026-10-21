@@ -12,7 +12,7 @@ proposal and approves no video.
 from __future__ import annotations
 
 import argparse
-import io
+import hashlib
 import json
 import sys
 import time
@@ -25,12 +25,18 @@ ROOT = Path(__file__).resolve().parent.parent
 DEMO = ROOT / "demo" / "flyover"
 PROJECT = json.loads((DEMO / "project.json").read_text())
 
-REQUEST_PLAN = "Draft a short-film plan from the brief: a compact treatment and about three shots."
-REQUEST_ASSETS = "The plan is approved. Prepare the assets: propose images for anything we should generate."
+# Stage A uses exactly this text (see docs/DEMO_APPROVAL_BRIEF.md).
+REQUEST_PLAN = ("Draft a short-film plan from the brief for my review: a compact treatment and about three night shots. "
+                "The location already exists as @underpass v1, a user-supplied AI-generated image (not a photograph of the "
+                "actual incident); reuse that handle, use its night lighting as the visual reference, and don't plan to "
+                "generate it. Use only @boy and @underpass in the shots, and describe the smartphone in the action rather "
+                "than as a separate asset. Keep what I observed separate from your additions. Write the plan as a draft "
+                "and stop: don't propose any image or video generation.")
+REQUEST_ASSETS = "The plan is approved. Prepare the assets: propose images only for assets marked generate."
 REQUEST_VIDEO = "Propose the first video for shot 1 of the approved plan."
-STEPS = ["1 idea and references", "2 agent proposes a plan (mocked)", "3 human approves the plan",
-         "4 location: upload", "5 agent proposes asset images (mocked)", "6 human approves images, then chooses results",
-         "7 agent proposes the first video (mocked); stop at pending"]
+STEPS = ["1 idea, brief and the supplied location", "2 agent proposes a plan (mocked)", "3 human approves the plan",
+         "4 agent proposes the @boy image (mocked)", "5 human approves the image, then chooses it",
+         "6 agent proposes the first video (mocked); stop at pending"]
 
 
 class Api:
@@ -58,36 +64,31 @@ class Api:
             return json.loads(r.read())["sha256"]
 
 
-def location_image(images: Path | None) -> tuple[bytes, str, bool]:
-    """The owner's photo if supplied (demo/flyover/underpass.jpg|png or --images), else a labelled placeholder."""
-    for folder in [p for p in (images, DEMO) if p]:
-        for ext in ("jpg", "jpeg", "png", "webp"):
-            f = folder / f"underpass.{ext}"
-            if f.is_file():
-                return f.read_bytes(), f.name, True
-    from PIL import Image, ImageDraw, ImageFont
-    img = Image.new("RGB", (1424, 800), (96, 96, 100))
-    d = ImageDraw.Draw(img)
-    try:
-        big, small = ImageFont.load_default(size=44), ImageFont.load_default(size=26)
-    except TypeError:
-        big = small = ImageFont.load_default()
-    d.rectangle([0, 0, 1424, 90], fill=(180, 20, 20))
-    d.text((24, 20), "REHEARSAL PLACEHOLDER - not the real location", fill="white", font=big)
-    for i, line in enumerate(["@underpass: supply your own photo of the flyover U-turn",
-                              "(demo/flyover/underpass.jpg). Drawn in this repo; no rights issues."]):
-        d.text((24, 140 + 40 * i), line, fill=(235, 235, 235), font=small)
-    buf = io.BytesIO()
-    img.save(buf, "PNG")
-    return buf.getvalue(), "underpass_placeholder.png", False
-
-
 def seed(api: Api, images: Path | None = None) -> dict:
+    """Project, decisions and the owner's location image (imported byte-for-byte, hash-checked, with provenance)."""
     p = api.call("POST", "/api/projects", {k: PROJECT[k] for k in ("name", "brief", "direction")})
     for text in PROJECT["decisions"]:
         api.call("POST", f"/api/projects/{p['id']}/decisions", {"text": text})
+    loc = PROJECT["location"]
+    f = next((d / loc["file"] for d in (images, DEMO) if d and (d / loc["file"]).is_file()), None)
+    imported = False
+    if f is None:
+        print(f"  @{loc['handle']}: MISSING (put the owner's image at demo/flyover/{loc['file']})")
+    else:
+        data = f.read_bytes()
+        if hashlib.sha256(data).hexdigest() != loc["sha256"]:
+            raise SystemExit(f"{f} does not match the recorded sha256; not importing a different image silently")
+        sha = api.upload(data, loc["original_name"], "image/png")
+        if sha != loc["sha256"]:
+            raise SystemExit("the app stored different bytes than the file; aborting")
+        a = api.call("POST", f"/api/projects/{p['id']}/assets", {
+            "kind": loc["kind"], "name": loc["name"], "handle": loc["handle"], "description": loc["description"],
+            "media_sha": sha, "provenance": loc["provenance"]})
+        imported = True
+        print(f"  @{loc['handle']} v1 imported unchanged (sha256 {sha[:12]}…, {a['versions'][0]['width']}x"
+              f"{a['versions'][0]['height']} PNG); source: user-supplied AI-generated image")
     print(f"seeded project {p['id']} ({PROJECT['name']}) with {len(PROJECT['decisions'])} decisions")
-    return {"project_id": p["id"]}
+    return {"project_id": p["id"], "location_imported": imported}
 
 
 def agent(api: Api, pid: str, text: str) -> dict:
@@ -121,7 +122,7 @@ class _Stop(Exception):
     pass
 
 
-def rehearse(api: Api, out: Path | None, stop_after: int = 7, images: Path | None = None) -> None:
+def rehearse(api: Api, out: Path | None, stop_after: int = 6, images: Path | None = None) -> None:
     status = api.call("GET", "/api/status")
     cfg = api.call("GET", "/api/agent/config")
     if status.get("adapter") != "fake" or cfg["provider"] not in ("replay", "scripted") or cfg["live"]:
@@ -146,14 +147,11 @@ def rehearse(api: Api, out: Path | None, stop_after: int = 7, images: Path | Non
         print(f"\nwrote {out}/rehearsal_log.json")
 
 
-def _plan_assets(api: Api, pid: str) -> list[dict]:
-    return api.call("GET", f"/api/projects/{pid}/plan")["content"]["assets"]
-
-
 def _journey(api: Api, log: dict, step, images: Path | None) -> None:
     step(0)
-    pid = seed(api, images)["project_id"]
-    log["steps"][-1]["project"] = pid
+    seeded = seed(api, images)
+    pid = seeded["project_id"]
+    log["steps"][-1].update(project=pid, location_imported=seeded["location_imported"])
 
     step(1)
     a = agent(api, pid, REQUEST_PLAN)
@@ -164,25 +162,11 @@ def _journey(api: Api, log: dict, step, images: Path | None) -> None:
 
     step(2)
     r = api.call("POST", f"/api/plans/{plan['id']}/approve", {"expected_revision": plan["revision"]})
-    print("  approved; created shots:", [c["key"] for c in r["report"]["created_shots"]])
+    print("  approved; created shots:", [(c["key"], f"{c['pinned']} pinned") for c in r["report"]["created_shots"]])
     log["steps"][-1].update(report=r["report"])
     prep(api, pid)
 
     step(3)
-    data, name, real = location_image(images)
-    sha = api.upload(data, name, "image/jpeg" if name.endswith(("jpg", "jpeg")) else "image/png")
-    loc = next(x for x in _plan_assets(api, pid) if x["handle"] == "underpass")
-    asset = api.call("POST", f"/api/projects/{pid}/assets", {
-        "kind": loc["kind"], "name": loc["name"], "handle": "underpass",
-        "description": loc["description"] if real else "REHEARSAL PLACEHOLDER: " + loc["description"],
-        "media_sha": sha})
-    pinned = api.call("POST", f"/api/asset-versions/{asset['versions'][0]['id']}/choose", {"pin_to_planned_shots": True})
-    print(f"  uploaded {'owner photo' if real else 'labelled placeholder'} as @underpass v1; pinned to",
-          [p["key"] for p in pinned["pinned_shots"]])
-    log["steps"][-1].update(real_location_photo=real)
-    prep(api, pid)
-
-    step(4)
     agent(api, pid, REQUEST_ASSETS)
     gens = [g for g in api.call("GET", f"/api/projects/{pid}/asset-generations") if g["status"] == "pending"]
     if not gens:
@@ -192,7 +176,7 @@ def _journey(api: Api, log: dict, step, images: Path | None) -> None:
     log["steps"][-1].update(proposals=[{"handle": g["handle"], "prompt": g["request"]["prompt"],
                                         "settings": g["settings"], "est_credits": g["est_credits"]} for g in gens])
 
-    step(5)
+    step(4)
     for g in gens:
         api.call("POST", f"/api/asset-generations/{g['id']}/approve")
         done = wait_gen(api, pid, g["id"])
@@ -201,7 +185,7 @@ def _journey(api: Api, log: dict, step, images: Path | None) -> None:
     p = prep(api, pid)
     log["steps"][-1].update(statuses={r["handle"]: r["status"] for r in p["requirements"]})
 
-    step(6)
+    step(5)
     agent(api, pid, REQUEST_VIDEO)
     shots = api.call("GET", f"/api/projects/{pid}")["shots"]
     s1 = api.call("GET", f"/api/shots/{shots[0]['id']}")
@@ -220,8 +204,8 @@ def main() -> None:
     ap.add_argument("command", choices=["seed", "rehearse"])
     ap.add_argument("--base", default="http://127.0.0.1:8700")
     ap.add_argument("--out", type=Path, help="rehearse: where to write the log")
-    ap.add_argument("--images", type=Path, help="folder holding your location photo as underpass.jpg/png")
-    ap.add_argument("--stop-after", type=int, default=7, help="rehearse: stop after this step (1-7)")
+    ap.add_argument("--images", type=Path, help="folder holding the location image (default: demo/flyover)")
+    ap.add_argument("--stop-after", type=int, default=6, help="rehearse: stop after this step (1-6)")
     a = ap.parse_args()
     api = Api(a.base)
     seed(api, a.images) if a.command == "seed" else rehearse(api, a.out, a.stop_after, a.images)

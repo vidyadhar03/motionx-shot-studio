@@ -78,7 +78,7 @@ function VersionForm({ asset, onDone, onError }: { asset: Asset; onDone: () => v
     <div className="form version-form">
       <div className="versions">
         {asset.versions.map((v) => (
-          <figure key={v.id} title={v.description}><img src={media(v.media_sha)} alt="" />
+          <figure key={v.id} title={`${v.description}${v.provenance ? `\nSource: ${v.provenance}` : ""}`}><img src={media(v.media_sha)} alt="" />
             <figcaption>v{v.version}{v.origin === "generated" ? ` · gen · ${v.review}` : ""}{v.version === asset.current_version ? " · current" : ""}</figcaption></figure>
         ))}
       </div>

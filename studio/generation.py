@@ -302,7 +302,7 @@ class GenerationService:
             {"role": "reference", "label": r["label"], "asset_id": r["asset_id"], "handle": r["handle"],
              "kind": r["kind"], "name": r["name"], "asset_version_id": r["asset_version_id"],
              "version": r["version"], "description": r["description"], "sha256": r["media_sha"],
-             "mime": r["mime"], "width": r["width"], "height": r["height"]}
+             "mime": r["mime"], "width": r["width"], "height": r["height"], "provenance": r.get("provenance") or ""}
             for r in self.ops.resolve_refs(shot.get("refs") or "[]")] if req.references else []
         return {
             "schema": 1,

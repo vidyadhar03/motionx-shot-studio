@@ -126,7 +126,7 @@ class Exporter:
                 "generation": snapshot,
                 "generation_snapshot_sha256": hashlib.sha256(snap_text.encode()).hexdigest(),
                 "pinned_asset_versions": [{k: i.get(k) for k in ("label", "asset_id", "handle", "kind", "asset_version_id",
-                                                                   "version", "sha256")}
+                                                                   "version", "sha256", "provenance")}
                                           for i in snapshot.get("inputs", []) if i.get("role") == "reference"],
                 "start_frame": next(({k: i.get(k) for k in ("sha256", "width", "height", "mime")}
                                      for i in snapshot.get("inputs", []) if i.get("role") == "start_frame"), None),
