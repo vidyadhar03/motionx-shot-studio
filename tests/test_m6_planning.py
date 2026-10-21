@@ -327,3 +327,18 @@ def test_restricting_after_a_pending_video_proposal_makes_it_unapprovable(world:
     assert world.service.get_proposal(prop["id"])["status"] == "stale"
     with pytest.raises(ValueError, match="video is blocked"):
         world.service.create_proposal(shot["id"])
+
+
+def test_upload_held_for_review_is_not_current_until_chosen(world: World):
+    pid, pl, ag = _setup(world)
+    v1 = _mood_only_location(world, pid, pl)
+    pl.approve(pl.write_plan(pid, PLAN, expected_revision=None)["id"], 1)
+    a = world.ops.add_asset_version(v1["id"], media_sha=world.media.put_image(png(800, 600)).sha256,
+                                    description="revised", provenance="user-supplied", hold_for_review=True)
+    v2 = a["versions"][0]
+    assert a["current_version"] == 1 and v2["review"] == "unreviewed" and v2["needs_review"] == 1
+    assert {r["handle"]: r["status"] for r in pl.preparation(pid)["requirements"]}["market"] == "reference_only"
+    assert world.ops.list_shots(pid)[0]["refs"] == "[]"                       # nothing pinned on import
+    out = pl.choose_version(v2["id"])                                          # a person approves it
+    assert out["asset"]["current_version"] == 2 and out["pinned_shots"]
+    assert out["asset"]["versions"][1]["restriction"] == "mood_reference_only"   # v1 stays restricted

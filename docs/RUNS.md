@@ -239,3 +239,8 @@ The app enforces this through `.env`: `STUDIO_MAX_PAID_ATTEMPTS=1` and `STUDIO_B
 - Image caps back to 0 (they aren't set in `.env`).
 - The generated preview copy is gitignored.
 - Awaiting the owner's visual review: choose or reject.
+
+**Owner decision, no model call (2026-10-21):**
+- @boy v1 (`av_0460b8984f4048aa`, generation `agn_cf547c26feeb4ddc`) was **accepted by the owner**. It is now chosen and current, and pinned as Image 1 in s1–s3.
+- Video stays blocked: @underpass v1 is still mood reference only.
+- The revised location "Quiet Underpass Shelter at Midnight.png" was **not found** in Downloads, Desktop or Pictures. The owner has been asked to supply it.

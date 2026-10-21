@@ -65,6 +65,17 @@ export default function PrepPanel({ projectId, refreshKey, onChanged, onError }:
           </div>
           {genFor === r.handle && wf && <GenerateForm req={r} wf={wf} chosen={chosen} projectId={projectId}
                                                        onDone={() => { setGenFor(null); load(); }} onError={onError} />}
+          {(r.asset?.versions ?? []).filter((v) => v.origin === "upload" && v.review === "unreviewed").map((v) => (
+            <div key={v.id} className="gen-card">
+              <div className="gen-head"><span className="pill fake">UPLOAD AWAITING YOUR REVIEW</span><span className="muted">v{v.version}</span></div>
+              {v.provenance && <div className="hint">Source: {v.provenance}</div>}
+              <div className="gen-result"><img src={media(v.media_sha)} alt="" />
+                <div className="actions left">
+                  <button className="small ghost" onClick={() => api.rejectVersion(v.id).then(done).catch(onError)}>Reject</button>
+                  <button className="small primary" onClick={() => api.chooseVersion(v.id, true).then(done).catch(onError)}>Approve &amp; use in planned shots</button>
+                </div></div>
+            </div>
+          ))}
           {gens.filter((g) => g.handle === r.handle && g.status !== "rejected").map((g) => (
             <GenCard key={g.id} g={g} versions={r.asset?.versions ?? []} onDone={done} onError={onError} />
           ))}

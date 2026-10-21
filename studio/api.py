@@ -84,6 +84,7 @@ class AssetVersionIn(BaseModel):
     description: str | None = None
     media_sha: str | None = None
     provenance: str = ""
+    hold_for_review: bool = False
 
 
 class DecisionIn(BaseModel):
@@ -426,7 +427,7 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     @app.post("/api/assets/{aid}/versions", status_code=201)
     def add_version(aid: str, body: AssetVersionIn) -> dict:
         return ops.add_asset_version(aid, description=body.description, media_sha=body.media_sha,
-                                     provenance=body.provenance)
+                                     provenance=body.provenance, hold_for_review=body.hold_for_review)
 
     @app.patch("/api/projects/{pid}")
     def patch_project(pid: str, body: ProjectPatch) -> dict:

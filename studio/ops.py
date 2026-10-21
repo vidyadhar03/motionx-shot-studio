@@ -312,10 +312,11 @@ class Ops:
         return self.get_asset(aid)
 
     def add_asset_version(self, aid: str, *, description: str | None = None, media_sha: str | None = None,
-                          origin: str = "upload", generation_id: str | None = None, provenance: str = "") -> dict:
+                          origin: str = "upload", generation_id: str | None = None, provenance: str = "",
+                          hold_for_review: bool = False) -> dict:
         """Never edits an existing version. Shots keep pointing at the version they pinned until
         someone explicitly updates the shot, so earlier takes' inputs stay true. An uploaded version
-        becomes current; a generated one waits until a person chooses it (choose_version)."""
+        becomes current unless `hold_for_review`; a generated one always waits until a person chooses it."""
         asset = self.get_asset(aid)
         cur = self.current_version(asset) or asset["versions"][0] if asset["versions"] else None
         desc = (cur["description"] if cur else "") if description is None else description.strip()
@@ -329,9 +330,10 @@ class Ops:
         with self.db.tx(immediate=True) as c:
             n = (c.execute("SELECT MAX(version) AS v FROM asset_versions WHERE asset_id=?", (aid,)).fetchone()["v"] or 0) + 1
             c.execute("INSERT INTO asset_versions(id,asset_id,version,description,media_sha,created_at,origin,generation_id,"
-                      "provenance) VALUES (?,?,?,?,?,?,?,?,?)",
-                      (new_id("av"), aid, n, desc, sha, now(), origin, generation_id, provenance.strip()[:500]))
-            if origin == "upload":
+                      "provenance,needs_review) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                      (new_id("av"), aid, n, desc, sha, now(), origin, generation_id, provenance.strip()[:500],
+                       int(hold_for_review)))
+            if origin == "upload" and not hold_for_review:
                 c.execute("UPDATE assets SET current_version=? WHERE id=?", (n, aid))
         return self.get_asset(aid)
 
@@ -373,7 +375,7 @@ class Ops:
             "LEFT JOIN asset_version_restrictions x ON x.asset_version_id=v.id WHERE asset_id=? ORDER BY version DESC", aid)
         for v in a["versions"]:
             # Uploaded versions are a person's own choice; generated ones need an explicit review.
-            v["review"] = v["review"] or ("chosen" if v["origin"] == "upload" else "unreviewed")
+            v["review"] = v["review"] or ("chosen" if v["origin"] == "upload" and not v.get("needs_review") else "unreviewed")
         return a
 
     def list_assets(self, pid: str) -> list[dict]:

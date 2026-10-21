@@ -6,7 +6,7 @@ export type Scene = { id: string; project_id: string; name: string; order_idx: n
 export type AssetVersion = { id: string; asset_id: string; version: number; description: string; media_sha: string;
                              width: number; height: number; created_at: string;
                              origin: "upload" | "generated"; generation_id: string | null; review: "chosen" | "rejected" | "unreviewed";
-                             provenance: string; restriction: string | null; restriction_note: string | null };
+                             provenance: string; restriction: string | null; restriction_note: string | null; needs_review?: number };
 export type Asset = { id: string; project_id: string; kind: "character" | "location" | "prop"; name: string; handle: string;
                       current_version: number; versions: AssetVersion[] };
 export type RefResolved = { asset_version_id: string; asset_id: string; version: number; latest_version: number;
