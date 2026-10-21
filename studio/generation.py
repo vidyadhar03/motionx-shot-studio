@@ -125,6 +125,15 @@ class GenerationService:
         an unsupported combination is refused with a reason instead of silently dropped."""
         mode = shot.get("mode") or "first_frame"
         workflow_id = workflow_id or WORKFLOW_FOR_MODE[mode]
+        # Gates checked here so they apply both when proposing and again at approval (freshness).
+        from .planning import Planning
+        blockers = Planning(self.db, self.ops).video_blockers(shot["id"])
+        if blockers:
+            raise ValueError("video is blocked for this planned shot: " + "; ".join(blockers))
+        bad = self.ops.restricted_versions([r["asset_version_id"] for r in json.loads(shot.get("refs") or "[]")])
+        if bad:
+            raise ValueError(", ".join(f"@{b['handle']} v{b['version']}" for b in bad) +
+                             " is restricted to mood reference only and can't be a generation input")
         start = None
         if shot.get("start_frame_sha"):
             rec = self.media.get(shot["start_frame_sha"])

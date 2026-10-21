@@ -212,6 +212,21 @@ class Ops:
                               "WHERE v.id=?", r["asset_version_id"])
             if not row or row["project_id"] != pid:
                 raise ValueError(f"asset version {r['asset_version_id']} is not in this project")
+        bad = self.restricted_versions([r["asset_version_id"] for r in json.loads(clean.get("refs") or "[]")])
+        if bad:
+            raise ValueError(", ".join(f"@{b['handle']} v{b['version']}" for b in bad) +
+                             " is restricted to mood reference only; it can't be pinned into a shot")
+
+    def restricted_versions(self, version_ids: list[str]) -> list[dict]:
+        """Versions a person restricted (e.g. mood reference only): never usable as generation inputs."""
+        out = []
+        for vid in version_ids:
+            row = self.db.one("SELECT x.restriction, a.handle, v.version FROM asset_version_restrictions x "
+                              "JOIN asset_versions v ON v.id=x.asset_version_id JOIN assets a ON a.id=v.asset_id "
+                              "WHERE x.asset_version_id=?", vid)
+            if row:
+                out.append(row)
+        return out
 
     def resolve_refs(self, refs_json: str) -> list[dict]:
         """Pinned versions in prompt order, with the asset's latest version for 'update available'."""
@@ -352,8 +367,10 @@ class Ops:
         if not a:
             raise NotFoundError(f"asset {aid} not found")
         a["versions"] = self.db.all(
-            "SELECT v.*, m.width, m.height, m.mime, r.review FROM asset_versions v JOIN media m ON m.sha256=v.media_sha "
-            "LEFT JOIN asset_version_reviews r ON r.asset_version_id=v.id WHERE asset_id=? ORDER BY version DESC", aid)
+            "SELECT v.*, m.width, m.height, m.mime, r.review, x.restriction, x.note AS restriction_note "
+            "FROM asset_versions v JOIN media m ON m.sha256=v.media_sha "
+            "LEFT JOIN asset_version_reviews r ON r.asset_version_id=v.id "
+            "LEFT JOIN asset_version_restrictions x ON x.asset_version_id=v.id WHERE asset_id=? ORDER BY version DESC", aid)
         for v in a["versions"]:
             # Uploaded versions are a person's own choice; generated ones need an explicit review.
             v["review"] = v["review"] or ("chosen" if v["origin"] == "upload" else "unreviewed")

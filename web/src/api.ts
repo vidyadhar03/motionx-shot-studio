@@ -6,7 +6,7 @@ export type Scene = { id: string; project_id: string; name: string; order_idx: n
 export type AssetVersion = { id: string; asset_id: string; version: number; description: string; media_sha: string;
                              width: number; height: number; created_at: string;
                              origin: "upload" | "generated"; generation_id: string | null; review: "chosen" | "rejected" | "unreviewed";
-                             provenance: string };
+                             provenance: string; restriction: string | null; restriction_note: string | null };
 export type Asset = { id: string; project_id: string; kind: "character" | "location" | "prop"; name: string; handle: string;
                       current_version: number; versions: AssetVersion[] };
 export type RefResolved = { asset_version_id: string; asset_id: string; version: number; latest_version: number;
@@ -97,7 +97,7 @@ export type AssetGen = { id: string; handle: string; status: string; created_by:
     references: { asset_version_id: string; handle: string; version: number; sha256: string; label: string }[] };
   settings: Record<string, any> };
 export type Requirement = { handle: string; kind: string; name: string; description: string; source: string;
-  image_prompt: string; required: boolean; status: "missing" | "proposed" | "generating" | "review" | "ready";
+  image_prompt: string; required: boolean; status: "missing" | "proposed" | "generating" | "review" | "ready" | "reference_only";
   asset: Asset | null; current: AssetVersion | null;
   generations: { id: string; status: string; created_by: string; est_credits: number; asset_version_id: string | null }[];
   shots: { key: string; shot_id: string; title: string; pinned_version: number | null }[] };
@@ -177,6 +177,8 @@ export const api = {
   rejectAssetGen: (gid: string) => call<AssetGen>("POST", `/api/asset-generations/${gid}/reject`),
   chooseVersion: (avid: string, pin: boolean) =>
     call<{ asset: Asset; pinned_shots: { key: string }[] }>("POST", `/api/asset-versions/${avid}/choose`, { pin_to_planned_shots: pin }),
+  restrictVersion: (avid: string, note: string) => call<Asset>("POST", `/api/asset-versions/${avid}/restrict`, { note }),
+  allowGeneration: (avid: string) => call<Asset>("POST", `/api/asset-versions/${avid}/allow-generation`),
   rejectVersion: (avid: string) => call<Asset>("POST", `/api/asset-versions/${avid}/reject`),
   candidates: (tid: string) => call<{ jobs: { id: string; status: string; created_at: string }[] }>("GET", `/api/takes/${tid}/candidates`),
 };

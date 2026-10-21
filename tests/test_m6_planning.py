@@ -279,3 +279,51 @@ def test_supplied_png_is_stored_byte_for_byte_with_provenance_kept_out_of_prompt
     take, _ = world.service.approve(prop["id"])
     ref = next(i for i in world.ops.get_take(take["id"])["snapshot"]["inputs"] if i["role"] == "reference")
     assert ref["provenance"].startswith("User-supplied AI-generated") and ref["sha256"] == rec.sha256
+
+
+def _mood_only_location(world: World, pid: str, pl: Planning) -> dict:
+    a = world.ops.create_asset(pid, kind="location", name="Market street", handle="market", description="mood",
+                               media_sha=world.media.put_image(png()).sha256, provenance="user-supplied AI image")
+    pl.restrict_version(a["versions"][0]["id"], "layout not approved for video")
+    return a
+
+
+def test_mood_reference_only_location_is_never_pinned_and_blocks_video(world: World):
+    pid, pl, ag = _setup(world)
+    loc = _mood_only_location(world, pid, pl)
+    out = pl.approve(pl.write_plan(pid, PLAN, expected_revision=None)["id"], 1)
+    assert all(c["pinned"] == 0 for c in out["report"]["created_shots"])          # not pinned at approval
+    prep = {r["handle"]: r for r in pl.preparation(pid)["requirements"]}
+    assert prep["market"]["status"] == "reference_only" and "market" in pl.preparation(pid)["missing_required"]
+    av = loc["versions"][0]["id"]
+    with pytest.raises(ConflictError, match="mood reference only"):
+        pl.choose_version(av)                                                       # can't pin it
+    shot = world.ops.list_shots(pid)[0]
+    with pytest.raises(ValueError, match="mood reference only"):
+        world.ops.update_shot(shot["id"], {"refs": [{"asset_version_id": av}]}, shot["revision"])
+    with pytest.raises(ValueError, match="mood reference only"):
+        ag.create_proposal(pid, "vendor", prompt="x", reference_version_ids=[av])
+    # The vendor is ready, but the shot still needs a non-restricted location: video is blocked
+    pl.choose_version(_run_image(ag, ag.create_proposal(pid, "vendor", prompt="vendor")["id"])["asset_version_id"])
+    with pytest.raises(ValueError, match="video is blocked.*@market is a mood/lighting reference only"):
+        world.service.create_proposal(shot["id"])
+    # A person approves the location for generation: then it can be pinned and video proposed
+    pl.lift_restriction(av)
+    pl.choose_version(av)
+    prop = world.service.create_proposal(shot["id"])
+    assert prop["status"] == "pending" and "Image 1 is @market" in prop["resolved_prompt"]
+
+
+def test_restricting_after_a_pending_video_proposal_makes_it_unapprovable(world: World):
+    pid, pl, ag = _setup(world)
+    loc = world.ops.create_asset(pid, kind="location", name="Market street", handle="market", description="street",
+                                 media_sha=world.media.put_image(png()).sha256)
+    pl.approve(pl.write_plan(pid, PLAN, expected_revision=None)["id"], 1)
+    pl.choose_version(loc["versions"][0]["id"])
+    pl.choose_version(_run_image(ag, ag.create_proposal(pid, "vendor", prompt="vendor")["id"])["asset_version_id"])
+    shot = world.ops.list_shots(pid)[0]
+    prop = world.service.create_proposal(shot["id"])
+    pl.restrict_version(loc["versions"][0]["id"], "changed my mind")               # unpins -> new shot revision
+    assert world.service.get_proposal(prop["id"])["status"] == "stale"
+    with pytest.raises(ValueError, match="video is blocked"):
+        world.service.create_proposal(shot["id"])

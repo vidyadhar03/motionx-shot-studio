@@ -183,3 +183,16 @@ The app enforces this through `.env`: `STUDIO_MAX_PAID_ATTEMPTS=1` and `STUDIO_B
   - Seedream 5.0 Flash, 832×1248, no references;
   - 5.43 credits estimated;
   - the request passes the capability check offline.
+
+**Approval and preparation, no model call (2026-10-21):**
+- **@underpass v1 restricted** to *mood reference only* by the owner (new `asset_version_restrictions`).
+  - A restricted version is never pinned into a shot and never used as a generation input.
+  - It leaves its requirement `reference_only`, which blocks video for every planned shot that needs it.
+  - Only a person can lift the restriction.
+- **Plan revision 3 approved** on the owner's instruction:
+  - It created the scene, s1–s3 (5 s each, `low_key_night`, nothing pinned) and the requirements @boy (missing) and @underpass (reference_only).
+  - All three shots report video blockers.
+- **Pending image proposal `agn_cf547c26feeb4ddc`** (`created_by` user, adapter `comfy_local`, paid):
+  - Seedream 5.0 Flash, 832×1248, no references, seed 673995477, 5.43 credits estimated.
+  - Not run. An approval attempt was refused locally because the image caps are 0, with no network call.
+- 6 live usage rows, unchanged since run 2.

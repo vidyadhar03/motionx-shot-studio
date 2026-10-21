@@ -78,6 +78,8 @@ class AssetGenerations:
                             "JOIN assets a ON a.id=v.asset_id WHERE v.id=?", avid)
             if not v or v["project_id"] != pid:
                 raise ValueError(f"reference {avid} is not an asset version in this project")
+            if self.ops.restricted_versions([avid]):
+                raise ValueError(f"@{v['handle']} v{v['version']} is restricted to mood reference only and can't be an input")
             rec = self.media.get(v["media_sha"])
             inputs.append(ImageInput(rec.sha256, self.media.path(rec), rec.mime, rec.width or 0, rec.height or 0))
             refs.append({"asset_version_id": v["id"], "handle": v["handle"], "version": v["version"],

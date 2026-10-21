@@ -267,7 +267,8 @@ class Planning:
                                pid, r["handle"])
             current = self.ops.current_version(asset) if asset else None
             unreviewed = [v for v in (asset or {}).get("versions", []) if v["review"] == "unreviewed"]
-            status = ("ready" if current else
+            status = ("reference_only" if current and current.get("restriction") else
+                      "ready" if current else
                       "review" if unreviewed else
                       "generating" if any(g["status"] in ("approved", "submitting", "running") for g in gens) else
                       "proposed" if any(g["status"] == "pending" for g in gens) else "missing")
@@ -284,6 +285,56 @@ class Planning:
                 "ready": sum(1 for r in out if r["status"] == "ready"),
                 "missing_required": [r["handle"] for r in out if r["required"] and r["status"] != "ready"]}
 
+    def video_blockers(self, sid: str) -> list[str]:
+        """Why video can't be generated for a shot created by an approved plan: a required asset of that shot is
+        not ready (missing, awaiting a choice, or restricted to mood reference only). Empty for other shots."""
+        link = self.db.one("SELECT plan_id, item_key FROM plan_links WHERE kind='shot' AND target_id=?", sid)
+        if not link:
+            return []
+        row = self._row(link["plan_id"])
+        if not row["approved_revision"]:
+            return []
+        content = self.plan_revision(row["id"], row["approved_revision"])["content"]
+        shot = next((s for s in content["shots"] if s["key"] == link["item_key"]), None)
+        if not shot:
+            return []
+        status = {r["handle"]: r for r in self.preparation(row["project_id"])["requirements"]}
+        out = []
+        for h in shot["assets"]:
+            r = status.get(h)
+            if r and r["required"] and r["status"] != "ready":
+                why = {"reference_only": "is a mood/lighting reference only; approve a location reference first",
+                       "missing": "has no image yet", "review": "has a generated image awaiting your choice",
+                       "proposed": "has only a pending image proposal", "generating": "is still generating"}.get(r["status"], r["status"])
+                out.append(f"@{h} {why}")
+        return out
+
+    def restrict_version(self, avid: str, note: str = "", by: str = "user") -> dict:
+        """HUMAN ONLY. Mark a version as a mood/lighting reference only; unpins it from shots."""
+        v = self.db.one("SELECT v.id, a.id AS aid, a.project_id FROM asset_versions v JOIN assets a ON a.id=v.asset_id "
+                        "WHERE v.id=?", avid)
+        if not v:
+            raise NotFoundError(f"asset version {avid} not found")
+        with self.db.tx() as c:
+            c.execute("INSERT INTO asset_version_restrictions(asset_version_id,restriction,note,by,at) VALUES (?,?,?,?,?) "
+                      "ON CONFLICT(asset_version_id) DO UPDATE SET note=excluded.note, by=excluded.by, at=excluded.at",
+                      (avid, "mood_reference_only", note[:500], by, now()))
+        for s in self.ops.list_shots(v["project_id"]):
+            refs = json.loads(s["refs"] or "[]")
+            if any(r["asset_version_id"] == avid for r in refs):
+                self.ops.update_shot(s["id"], {"refs": [r for r in refs if r["asset_version_id"] != avid]},
+                                     s["revision"], author="user")
+        return self.ops.get_asset(v["aid"])
+
+    def lift_restriction(self, avid: str, by: str = "user") -> dict:
+        """HUMAN ONLY. Approve a restricted version for generation (e.g. the final location reference)."""
+        v = self.db.one("SELECT asset_id FROM asset_versions WHERE id=?", avid)
+        if not v:
+            raise NotFoundError(f"asset version {avid} not found")
+        with self.db.tx() as c:
+            c.execute("DELETE FROM asset_version_restrictions WHERE asset_version_id=?", (avid,))
+        return self.ops.get_asset(v["asset_id"])
+
     def choose_version(self, avid: str, *, pin_to_planned_shots: bool = True, by: str = "user") -> dict:
         """HUMAN ONLY. Make a version current (generated versions need this before any shot can use them) and,
         optionally, pin it into the planned shots that list this asset, in the plan's reference order."""
@@ -291,6 +342,9 @@ class Planning:
                         "JOIN assets a ON a.id=v.asset_id WHERE v.id=?", avid)
         if not v:
             raise NotFoundError(f"asset version {avid} not found")
+        if pin_to_planned_shots and self.ops.restricted_versions([avid]):
+            raise ConflictError(f"@{v['handle']} v{v['version']} is restricted to mood reference only; a person must "
+                                "approve it for generation before it can be pinned into shots")
         with self.db.tx() as c:
             c.execute("INSERT INTO asset_version_reviews(asset_version_id,review,by,at) VALUES (?,?,?,?) "
                       "ON CONFLICT(asset_version_id) DO UPDATE SET review='chosen', by=excluded.by, at=excluded.at",

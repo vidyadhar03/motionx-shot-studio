@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, AssetGen, ImageWorkflow, media, Preparation, Requirement } from "./api";
 
 const LABEL: Record<Requirement["status"], string> = {
-  missing: "MISSING", proposed: "IMAGE PROPOSED", generating: "GENERATING", review: "AWAITING YOUR CHOICE", ready: "READY",
+  missing: "MISSING", reference_only: "MOOD REFERENCE ONLY · blocks video", proposed: "IMAGE PROPOSED", generating: "GENERATING", review: "AWAITING YOUR CHOICE", ready: "READY",
 };
 
 export default function PrepPanel({ projectId, refreshKey, onChanged, onError }: {
@@ -49,11 +49,16 @@ export default function PrepPanel({ projectId, refreshKey, onChanged, onError }:
                 <span className={`pill ${r.status === "ready" ? "ok" : "fake"}`}>{LABEL[r.status]}{r.current ? ` · v${r.current.version}` : ""}</span></div>
               <div className="muted">{r.description}</div>
               {r.current?.provenance && <div className="hint">Source: {r.current.provenance}</div>}
+              {r.current?.restriction && <div className="hint warn-text">Restricted: mood/lighting reference only{r.current.restriction_note ? ` · ${r.current.restriction_note}` : ""}. Not pinned into shots or used as a generation input; video for shots that need @{r.handle} is blocked.</div>}
               {r.shots.length > 0 && <div className="hint">Planned shots: {r.shots.map((s) => `${s.key} ${s.title} (${s.pinned_version ? `pinned v${s.pinned_version}` : "not pinned"})`).join(" · ")}</div>}
               <div className="actions left">
                 <UploadButton req={r} projectId={projectId} onDone={done} onError={onError} />
                 <button className="small" onClick={() => setGenFor(genFor === r.handle ? null : r.handle)}>{genFor === r.handle ? "Close" : "Generate…"}</button>
-                {r.current && r.shots.some((s) => s.pinned_version !== r.current!.version) &&
+                {r.current?.restriction && <button className="small" onClick={() => confirm(`Approve @${r.handle} v${r.current!.version} as the reference for generation? It will be pinned into the planned shots.`) &&
+                  api.allowGeneration(r.current!.id).then(() => api.chooseVersion(r.current!.id, true)).then(done).catch(onError)}>Approve for generation…</button>}
+                {r.current && !r.current.restriction && r.status === "ready" &&
+                  <button className="small ghost" onClick={() => { const n = prompt("Restrict to mood/lighting reference only. Note:", "layout not approved for video"); if (n !== null) api.restrictVersion(r.current!.id, n).then(done).catch(onError); }}>Mood reference only…</button>}
+                {r.current && !r.current.restriction && r.shots.some((s) => s.pinned_version !== r.current!.version) &&
                   <button className="small" onClick={() => api.chooseVersion(r.current!.id, true).then(done).catch(onError)}>Use v{r.current.version} in planned shots</button>}
               </div>
             </div>

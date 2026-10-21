@@ -318,6 +318,17 @@ CREATE TABLE IF NOT EXISTS asset_version_reviews (
   at TEXT NOT NULL
 );
 
+-- A person's restriction on how a version may be used. 'mood_reference_only': readable as a mood/lighting
+-- reference (agent planning), never pinned into shots or used as a generation input, and it leaves its
+-- requirement not ready, which blocks video for planned shots that need it. Lifted only by a person.
+CREATE TABLE IF NOT EXISTS asset_version_restrictions (
+  asset_version_id TEXT PRIMARY KEY REFERENCES asset_versions(id),
+  restriction TEXT NOT NULL CHECK (restriction IN ('mood_reference_only')),
+  note TEXT NOT NULL DEFAULT '',
+  by TEXT NOT NULL,
+  at TEXT NOT NULL
+);
+
 -- Image generation for an asset: proposal -> human approval -> one job -> a new asset version.
 CREATE TABLE IF NOT EXISTS asset_generations (
   id TEXT PRIMARY KEY,

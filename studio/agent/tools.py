@@ -280,6 +280,8 @@ class AgentTools:
         return ({"handle": a["handle"], "version": v["version"], "asset_version_id": v["id"],
                  "description": v["description"], "is_current": v["version"] == a["current_version"],
                  "provenance": v.get("provenance") or "not recorded",
+                 "restriction": (f"{v['restriction']}: {v.get('restriction_note') or ''}".strip(": ")
+                                 if v.get("restriction") else None),
                  "origin": v.get("origin"),
                  "image": f"attached ({v['width']}x{v['height']})"}, [self._image(v["media_sha"])])
 

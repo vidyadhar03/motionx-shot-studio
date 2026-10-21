@@ -137,6 +137,10 @@ class ChooseIn(BaseModel):
     pin_to_planned_shots: bool = True
 
 
+class RestrictIn(BaseModel):
+    note: str = ""
+
+
 def create_app(settings: Settings | None = None, *, adapter: Adapter | None = None,
                balance_fn: Callable[[str | None], float | None] = fetch_balance_credits,
                start_worker: bool = True) -> FastAPI:
@@ -326,6 +330,15 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     @app.post("/api/asset-versions/{avid}/choose")
     def choose_asset_version(avid: str, body: ChooseIn) -> dict:
         return planning.choose_version(avid, pin_to_planned_shots=body.pin_to_planned_shots)
+
+    @app.post("/api/asset-versions/{avid}/restrict")
+    def restrict_asset_version(avid: str, body: RestrictIn) -> dict:
+        # HUMAN-ONLY: mood/lighting reference only; no agent tool wraps this or its lifting.
+        return planning.restrict_version(avid, body.note)
+
+    @app.post("/api/asset-versions/{avid}/allow-generation")
+    def lift_asset_restriction(avid: str) -> dict:
+        return planning.lift_restriction(avid)
 
     @app.post("/api/asset-versions/{avid}/reject")
     def reject_asset_version(avid: str) -> dict:
