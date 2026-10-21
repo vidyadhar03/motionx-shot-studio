@@ -169,3 +169,17 @@ The app enforces this through `.env`: `STUDIO_MAX_PAID_ATTEMPTS=1` and `STUDIO_B
 - Gemini reported 0 thought tokens and 0 tool-use tokens on every request, although thinking was `low` and tool results were sent.
 - The cap was never the limiting factor: the highest spent-plus-estimate was about $0.065, against $0.15.
 - The real charge must be confirmed in the Google billing console. Nothing is recorded as confirmed.
+
+**Follow-up, no LLM call (2026-10-21):**
+- Plan **revision 3**, author `user`: the owner's editorial changes, applied locally on top of Gemini's revision 2.
+  - "squats" throughout;
+  - the phone upright in portrait orientation;
+  - s1 cut to 5 s;
+  - explicit lighting continuity, with all shots `low_key_night`;
+  - s3 stays on the face with no thumb required;
+  - visible actions instead of "oblivious" and "disconnection".
+- Revisions 1–2 keep their `agent` attribution. Still a draft (`docs/runs/2026-10-21_plan_rev3_owner_edits.json`).
+- **The @boy image proposal was prepared but not created**, because it needs an approved plan:
+  - Seedream 5.0 Flash, 832×1248, no references;
+  - 5.43 credits estimated;
+  - the request passes the capability check offline.
