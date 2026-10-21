@@ -58,6 +58,7 @@ The app enforces this through `.env`: `STUDIO_MAX_PAID_ATTEMPTS=1` and `STUDIO_B
 | 2026-10-20, one bounded test | Gemini `gemini-3.8-flash` only, ≤ 8 model requests, 2,048 output tokens per request, thinking `low`, ≤ $0.10, no retries, no repeat sessions | **Used: 5 requests.** Live calls are disabled again (`STUDIO_AGENT_MAX_LIVE_REQUESTS=0`, budget 0) pending review |
 | 2026-10-21, demo Stage A (planning only) | Gemini `gemini-3.8-flash` only, one session, ≤ 8 model requests, $0.15 estimate-based cap, 4,096 output tokens, thinking `low`, no retries/fallback/cap increases, no image or video, no plan approval | **Used: 6 requests, calculated $0.033141.** Live calls disabled again (defaults: scripted, budget 0, 0 requests) pending review |
 | 2026-10-21, shot-1 revision session | Gemini `gemini-3.8-flash` only, one session, ≤ 8 new model requests, $0.10 new estimate-based cap (cumulative caps 14 requests / $0.133141 in this folder), 4,096 output tokens, thinking `low`, no retries/fallback/cap increases, no image/video | **Used: 5 requests, calculated $0.019766.** Live calls disabled again |
+| 2026-10-21, shot-1 follow-up (M7 controls) | Gemini `gemini-3.8-flash` only, one session, ≤ 8 new requests, $0.10 new estimate-based cap (cumulative 19 / $0.152907), no retries/fallback/cap increases, no image/video | **Used: 4 requests, calculated $0.013260.** Live calls disabled again |
 
 ### Live run 1: 2026-10-20 ~03:18–03:19 local, isolated project `data-live1` (synthetic assets, fake video adapter)
 
@@ -324,3 +325,42 @@ The app enforces this through `.env`: `STUDIO_MAX_PAID_ATTEMPTS=1` and `STUDIO_B
 | **Total** | 19,459 | 1,379 | 0 | 0 | – | **$0.019766** |
 
 The folder's cumulative live total is now 11 requests and $0.052907 calculated. Nothing is confirmed by billing.
+
+### Live run 4 (shot-1 follow-up with the M7 controls): 2026-10-21 17:08:48–17:09:08 UTC, `data-flyover-live`
+
+**Setup.**
+- Backed up first. The database gained the two empty M7 columns when opened.
+- Exact request: the owner's approved follow-up. It asked the agent to read the skill, the shot, take 1 with its feedback, and pending proposal `prp_c03a880b0da24a7a`.
+
+**Session.**
+- 4 requests, 6 tool calls, stop = model finished.
+- Calls:
+  - `read` skill, shot, take 1, the pending proposal;
+  - `write` (`expected_revision` 7 → **revision 8, author agent**);
+  - `propose_generation` (parent take 1) → **`prp_8e79a0284b5f4d6a`**, pending.
+
+**Changes (revision 8).**
+- `camera_move` tracking → **truck_right**.
+- `camera_detail` rewritten (sideways, gentle parallax, keeps the stationary boy visible).
+- The phone-light sentence was removed from `action`.
+- `lighting_detail` added: "Warm amber streetlight from above and behind; soft, steady glow from the phone on his face without flickering or blue flare."
+- `depth_of_field` left unset.
+- Framing, lighting preset, sound, references (@boy v2, @underpass v2), 5 s, 768P, 16:9 and seed 2995113552 unchanged.
+
+**Result.**
+- No direction warnings, no video blockers.
+- `prp_c03a880b0da24a7a` → `stale` ("shot changed (revision 8)"), kept.
+- Take 1 unchanged; shots 2–3 unchanged (revision 4).
+- New proposal: 135.78 credits estimated, not approved; video caps 0.
+
+**Usage.**
+
+| Request | Input | Output | Thought | Tool use | Pre-call estimate | Calculated |
+|---|---|---|---|---|---|---|
+| 1 | 2,595 | 144 | 0 | 0 | $0.0328 | $0.002486 |
+| 2 | 2,763 | 202 | 0 | 0 | $0.0370 | $0.002830 |
+| 3 | 2,971 | 161 | 0 | 0 | $0.0376 | $0.002832 |
+| 4 | 3,141 | 735 | 0 | 0 | $0.0383 | $0.005112 |
+| **Total** | 11,470 | 1,242 | 0 | 0 | – | **$0.013260** |
+
+The folder's cumulative live total is now 15 requests and $0.066167 calculated. Nothing is confirmed by billing.
