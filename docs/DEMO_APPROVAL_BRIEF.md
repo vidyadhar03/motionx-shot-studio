@@ -10,6 +10,11 @@
 - **@underpass v1** is restricted to mood/lighting reference only, so video is **blocked** for all shots until you approve a location reference.
 - **@boy image proposal** `agn_cf547c26feeb4ddc` is pending: Seedream 5.0 Flash, one image, 5.43 credits. It can't run until you approve Stage C and its image cap is set.
 
+**Stage C done (2026-10-21).**
+- One @boy image, observed **5.43 credits**.
+- Saved as v1, **unreviewed**: not current, not pinned. It waits for your visual approval.
+- Image spending is disabled again.
+
 **Since your Stage A approval:**
 - Night is recorded as a **creative choice**.
 - The supplied @underpass image is a **mood and night-lighting reference only**; its layout is not approved for video.

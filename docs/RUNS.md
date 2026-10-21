@@ -196,3 +196,46 @@ The app enforces this through `.env`: `STUDIO_MAX_PAID_ATTEMPTS=1` and `STUDIO_B
   - Seedream 5.0 Flash, 832×1248, no references, seed 673995477, 5.43 credits estimated.
   - Not run. An approval attempt was refused locally because the image caps are 0, with no network call.
 - 6 live usage rows, unchanged since run 2.
+
+## Paid image run 1 (demo Stage C): 2026-10-21 11:24:28–11:25:06 UTC, `data-flyover-live`
+
+**Authorisation:** the owner approved Stage C: one @boy image from pending proposal `agn_cf547c26feeb4ddc`, one attempt, a 6-credit cap, no retries, no extra images, no LLM or video.
+
+**Setup.**
+- Local ComfyUI 0.42.1 and comfy-api-proxy were started with `scripts/run_comfy.sh` for the run and stopped afterwards.
+- `ByteDanceSeedreamNodeV3` was registered.
+- Image caps were 6 credits / 1 attempt for this process only; video caps 0, LLM budget 0.
+
+**Pre-flight (all passed before submitting).** Checked that:
+- the proposal was still pending;
+- the prompt matched the approved plan's @boy `image_prompt`;
+- there were no references;
+- model "seedream 5.0 flash", size 832×1248;
+- estimate 5.43 ≤ 6;
+- the route was the paid one;
+- no other paid job was running;
+- the capability validation passed;
+- the balance was 919.22 ≥ 6.
+
+**Request (exact).**
+- Prompt: *"Full-body studio-lit photographic character reference of a fictional 10-year-old Indian boy, standing in a neutral pose facing camera against a neutral grey studio background. Wearing dirty, worn, and torn oversized dark t-shirt and faded shorts. Photorealistic, soft even lighting, clear facial features, completely unbranded clothing, no logos or text."*
+- Seedream 5.0 Flash, `(1K) 832x1248 (2:3)`, seed 673995477, watermark off, 1 image, no references.
+
+**Result.**
+- **Succeeded** in about 18 s, job `0c559e2a-cc24-4d33-b0fd-2ded2ef52c5c`.
+- Output: PNG 832×1248, 610,778 bytes, sha256 `3ccd9499…76f10`.
+- Saved as @boy **v1, origin `generated`, unreviewed**. `current_version` stays 0 and nothing is pinned to s1–s3.
+- 1 submission, no retries.
+
+**Charge.**
+- Balance 919.22 → 913.79, so **observed 5.43 credits** (= the estimate), confirmed by a balance delta read about 19 s after the job.
+- This is the first real charge for the Seedream pricing.
+
+**Checks.**
+- The PNG's embedded `tEXt` "prompt" holds only the submitted graph.
+- A key scan of the data folder and the ComfyUI output found no key.
+
+**After.**
+- Image caps back to 0 (they aren't set in `.env`).
+- The generated preview copy is gitignored.
+- Awaiting the owner's visual review: choose or reject.
