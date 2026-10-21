@@ -29,6 +29,10 @@ PRESETS: dict[str, dict[str, str]] = {
         "tracking": "Tracking shot following the subject at a constant distance.",
         "handheld": "Subtle handheld camera with natural sway.",
         "arc": "Slow arc around the subject.",
+        # Translation, not rotation: the camera body slides sideways without turning (unlike a pan) and doesn't
+        # follow a moving subject (unlike tracking), so nearer objects pass faster than distant ones (parallax).
+        "truck_left": "Slow sideways truck to the left: the camera travels parallel to the scene without turning, so the foreground shifts against the background.",
+        "truck_right": "Slow sideways truck to the right: the camera travels parallel to the scene without turning, so the foreground shifts against the background.",
     },
     "lens_look": {
         "clean": "Clean, sharp modern digital look.",
@@ -58,7 +62,7 @@ FRAMING_ORDER = {k: i for i, k in enumerate(("extreme_wide", "wide", "medium", "
 def camera_carries_end(framing: str, end: str, move: str | None) -> bool:
     """True when the camera move itself plausibly produces the framing change (push in -> tighter,
     pull out -> wider, or a travelling move). Otherwise the change must come from the subject."""
-    if move in ("tracking", "handheld", "arc"):
+    if move in ("tracking", "handheld", "arc", "truck_left", "truck_right"):
         return True
     tighter = FRAMING_ORDER[end] > FRAMING_ORDER[framing]
     return (move == "push_in" and tighter) or (move == "pull_out" and not tighter)
@@ -131,11 +135,13 @@ MOVE_FAMILIES: dict[str, tuple[str, ...]] = {
     "tracking": ("tracking", "track ", "follow"),
     "handheld": ("handheld", "hand-held"),
     "arc": ("arc", "orbit"),
+    "truck": ("truck", "crab", "lateral", "sideways"),
     "zoom": ("zoom",),                     # not a supported move at all
     "crane": ("crane", "jib", "drone", "aerial"),
 }
 PRESET_FAMILY = {"static": "static", "push_in": "push", "pull_out": "pull", "pan_left": "pan", "pan_right": "pan",
-                 "tilt_up": "tilt", "tilt_down": "tilt", "tracking": "tracking", "handheld": "handheld", "arc": "arc"}
+                 "tilt_up": "tilt", "tilt_down": "tilt", "tracking": "tracking", "handheld": "handheld", "arc": "arc",
+                 "truck_left": "truck", "truck_right": "truck"}
 _SECONDS = re.compile(r"(\d+(?:\.\d+)?)(?:\s*[-\u2013]\s*(\d+(?:\.\d+)?))?\s*(?:s|sec|secs|second|seconds)\b",
                       re.IGNORECASE)
 MAX_CAMERA_DETAIL, MAX_AUDIO = 200, 300
@@ -144,10 +150,12 @@ MOVE_NAMES: dict[str, tuple[str, ...]] = {
     "static": ("static", "locked-off", "locked off"), "push": ("push in", "push-in", "dolly in", "push "),
     "pull": ("pull out", "pull-out", "dolly out", "pull back"), "pan": ("pan ", "pans", "panning"),
     "tilt": ("tilt",), "tracking": ("tracking", "track "), "handheld": ("handheld", "hand-held"),
-    "arc": ("arc ", "orbit"),
+    "arc": ("arc ", "orbit"), "truck": ("truck", "crab"),
 }
 _TIGHT_WORDS = ("close-up", "close up", "closeup", "tight", "eyes", "face", "ecu", "macro")
-SIZE_CHANGING_MOVES = ("push_in", "pull_out", "tracking", "handheld", "arc")
+# Travelling moves: the camera itself changes position, so it may plausibly change the framing (a truck along a
+# curve can bring the subject closer); no rigid rule says it can't.
+SIZE_CHANGING_MOVES = ("push_in", "pull_out", "tracking", "handheld", "arc", "truck_left", "truck_right")
 
 
 def direction_issues(shot: dict[str, Any]) -> list[dict[str, str]]:
@@ -172,6 +180,10 @@ def direction_issues(shot: dict[str, Any]) -> list[dict[str, str]]:
         elif end == framing:
             warn("end_same_as_start", f"end_framing equals framing ({end}); a move can stay within one framing "
                                       "size, so this adds nothing to the prompt. Clear it unless you want it explicit")
+        elif move in ("truck_left", "truck_right"):
+            warn("truck_changes_size", f"a sideways truck usually keeps the shot size; {framing} -> {end} is allowed "
+                                       "(e.g. along a curve, or the subject moving), but say how it happens in "
+                                       "camera_detail or action")
         elif not camera_carries_end(framing, end, move):
             what = "a static camera" if move in (None, "static") else f"{move}"
             warn("end_from_subject", f"{what} doesn't itself take the frame from {framing} to {end}, so the prompt "

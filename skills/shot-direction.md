@@ -30,7 +30,7 @@ calibrated controls. Describe the picture plainly and expect to iterate.
 |---|---|---|
 | Size the shot **starts** at | `framing` | Always set it |
 | Size the shot **reaches** | `end_framing` | Only when the size changes. A push-in or pull-out does it with the camera; with a static camera, pan or tilt the subject's movement must do it (describe it in `action`; the app warns). A push-in may stay within one size: then leave it empty |
-| Which move | `camera_move` | One preset |
+| Which move | `camera_move` | One preset. **Pan** = the camera turns in place (no parallax). **Truck** (`truck_left`/`truck_right`) = the camera slides sideways without turning, so foreground passes background (parallax). **Tracking** = the camera follows a moving subject at a constant distance. Choose the one you mean; don't approximate a truck with tracking or a pan |
 | How the move **behaves** | `camera_detail` | Pace, timing and what it settles on. Don't restate the move ("slow push in" when `camera_move=push_in` says it twice; the app warns) |
 | How long it lasts | `duration_s` (4–15) | Changes cost. The write result reports the estimate before and after |
 
@@ -72,7 +72,7 @@ Don't lengthen past 15 s. If the note needs more, suggest splitting into shots i
 
 Presets:
 - `framing` / `end_framing`: extreme_wide, wide, medium, medium_close, close_up, insert (wide → tight in that order)
-- `camera_move`: static, push_in, pull_out, pan_left, pan_right, tilt_up, tilt_down, tracking, handheld, arc
+- `camera_move`: static, push_in, pull_out, pan_left, pan_right, tilt_up, tilt_down, tracking, handheld, arc, truck_left, truck_right
 - `lens_look`: clean, anamorphic, vintage
 - `lighting`: natural_day, golden_hour, low_key_night, practicals, backlit
 
