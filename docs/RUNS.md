@@ -440,3 +440,45 @@ The folder's cumulative live total is now 15 requests and $0.066167 calculated. 
 | **Total** | 26,633 | 1,803 | 0 | 0 | – | **$0.026737** |
 
 The folder's cumulative live total is now 21 requests and $0.092904 calculated. Nothing is confirmed by billing.
+
+## Paid video run 4 (shot 2, take 1): 2026-10-21 18:04:47–18:08:34 UTC, `data-flyover-live`
+
+**Authorisation:** the owner approved proposal `prp_331a952a10824988` unchanged for one attempt: ≤ 140 additional credits, no retries, no resubmission, no LLM or image calls; shot 1 locked on take 2; shot 3 untouched.
+
+**Pre-flight (all passed before submitting).** Checked that:
+- the proposal was pending and fresh;
+- this would be shot 2's first take (no parent);
+- shot 1 was locked on take 2 and shot 3 at revision 4;
+- paid route, `h3_reference`;
+- 5 s / 768P / 16:9 / seed 2738041485;
+- the references were @boy v2 + @underpass v2;
+- the estimate was 135.78 ≤ 140;
+- the ledger before held 271.56 over 2 attempts, so the allowance was exactly 140 / 1 attempt (cumulative caps 411.56 / 3 for this process only);
+- no takes were in flight;
+- the balance was 642.23.
+
+**Result.**
+- **Succeeded**: take `tk_6a696a7f64bf4c37` (shot 2, #1), job `120ec0a1-7914-4632-8154-d5779048c1ec`.
+- Timing: submitted 18:04:50, generated 18:08:31. **223.6 s** end to end.
+- Output: MP4 1344×768 at 24 fps, 124 frames, AAC stereo, 5.17 s, sha256 `94cffb8c…`.
+- 1 submission, no retries.
+
+**Charge.**
+- Balance 642.23 → 506.45, so **observed 135.78 credits** (= the estimate).
+- Ledger: 3 rows, 407.34 credits in this folder.
+
+**Checks and state.**
+- The key wasn't found in any output.
+- ComfyUI stopped; every cap is 0 by default.
+- Take unreviewed and unselected.
+- Shot 1 still locked on take 2; shot 3 at revision 4.
+
+**Offline analysis (sampled frames and measurements, no playback judgement).**
+- Side view: yes.
+- Framing: starts wider than medium (the boy small, on the kerb edge) and ends about medium close-up.
+- Push-in: about 1.57× magnification over the shot, uneven (mostly 1.0–2.5 s, plus a step near 4.0–4.5 s).
+- Posture and position: he sits on the kerb edge rather than squatting on the soil, further left than at the end of shot 1.
+- Phone: tilted rather than clearly vertical.
+- Glow: small bright spots on his fingers and the phone near the end; the face light is soft.
+
+**Preview:** `demo/flyover/s1_take2_then_s2_take1.mp4` (local, gitignored) joins shot 1's take 2 and this take; the originals are unchanged.
