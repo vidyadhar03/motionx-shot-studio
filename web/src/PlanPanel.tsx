@@ -59,6 +59,7 @@ export default function PlanPanel({ projectId, presets, onApproved, onOpenShot, 
             <label>Creative additions (one per line)<textarea rows={5} value={lines(c.creative_additions)} onChange={(e) => setDraft({ ...c, creative_additions: unlines(e.target.value) })} /></label>
           </div>
           <label>Guardrails (one per line)<textarea rows={4} value={lines(c.guardrails)} onChange={(e) => setDraft({ ...c, guardrails: unlines(e.target.value) })} /></label>
+          <label>Unresolved choices (one per line)<textarea rows={3} value={lines(c.open_questions ?? [])} onChange={(e) => setDraft({ ...c, open_questions: unlines(e.target.value) })} /></label>
         </div>
       ) : (
         <div className="plan-read">
@@ -70,6 +71,7 @@ export default function PlanPanel({ projectId, presets, onApproved, onOpenShot, 
             <div><div className="asset-kind">Creative additions</div><ul>{c.creative_additions.map((x) => <li key={x}>{x}</li>)}</ul></div>
           </div>
           {c.guardrails.length > 0 && <><div className="asset-kind">Guardrails</div><ul className="guardrails">{c.guardrails.map((x) => <li key={x}>{x}</li>)}</ul></>}
+          {(c.open_questions ?? []).length > 0 && <><div className="asset-kind">Unresolved choices</div><ul className="guardrails">{c.open_questions!.map((x) => <li key={x}>{x}</li>)}</ul></>}
         </div>
       )}
 

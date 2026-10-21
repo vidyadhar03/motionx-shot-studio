@@ -1,9 +1,16 @@
 # Demo approval brief: "Under the Flyover" (night)
 
-**Status (2026-10-21, revised after the location image was supplied):**
-- Prepared and rehearsed **offline only**.
-- No live LLM, image or video call has been made for this demo, and none is enabled. All caps are 0 by default.
-- Each stage below needs its own explicit approval. Existing balances and keys don't count as approval.
+**Status (2026-10-21, after Stage A):**
+- **Stage A ran once** (Gemini, 6 requests, calculated $0.033141; see `docs/RUNS.md`, live run 2). It produced a **draft** plan (revision 2) in `data-flyover-live`, awaiting your review.
+- Live calls are disabled again.
+- Stages B–D are **not** approved.
+
+**Since your Stage A approval:**
+- Night is recorded as a **creative choice**.
+- The supplied @underpass image is a **mood and night-lighting reference only**; its layout is not approved for video.
+- The location mismatch is **unresolved**.
+- The final location reference will be chosen before any video generation.
+- The §2 mock below predates these clarifications in places (it lists night lighting from the image). The live draft is what you review now.
 
 **Positioning:** an open-source, Comfy-powered directing workspace: describe an idea, plan shots, prepare references, approve generation, and revise with preserved creative decisions. We don't claim these concepts are unique (Higgsfield documents AI directing, script breakdown, reusable assets and human-triggered generation). Our angle is an open, local, inspectable implementation on Comfy workflows.
 

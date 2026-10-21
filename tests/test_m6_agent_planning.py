@@ -51,7 +51,10 @@ def test_mocked_agent_drafts_a_plan_that_waits_for_a_person(tmp_path):
     c = plan["content"]
     assert len(c["shots"]) == 3 and [a["handle"] for a in c["assets"]] == ["boy", "underpass"]
     assert all(sh["assets"] == ["boy", "underpass"] and sh["lighting"] == "low_key_night" for sh in c["shots"])
-    assert "It was night." in c["observed"] and not any("daylight" in x for x in c["creative_additions"])
+    assert not any("night" in x.lower() for x in c["observed"])             # night is a creative choice
+    assert any(x.startswith("Night (a creative choice") for x in c["creative_additions"])
+    assert not any("daylight" in x for x in c["creative_additions"])
+    assert any("Location reference" in q for q in c["open_questions"])
     assert "smartphone" in c["shots"][1]["action"]
     assert w.db.all("SELECT * FROM asset_generations") == []              # Stage A proposes nothing
     assert c["observed"] and c["creative_additions"] and any("causal" in g for g in c["guardrails"])

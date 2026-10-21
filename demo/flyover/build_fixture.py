@@ -18,17 +18,19 @@ from studio.planning import validate_plan  # noqa: E402
 
 OUT = Path(__file__).resolve().parent
 
-BRIEF = ("While travelling in Hyderabad at night, I saw a homeless child squatting beneath a flyover, wearing dirty, torn "
-         "clothes and deeply absorbed in scrolling reels on a smartphone. The contrast disturbed me. I want to explore that "
-         "moment through a short, realistic film. The location is beneath a flyover at a U-turn, on a raised planting bed "
+BRIEF = ("While travelling in Hyderabad, I saw a homeless child squatting beneath a flyover, wearing dirty, torn clothes "
+         "and deeply absorbed in scrolling reels on a smartphone. The contrast disturbed me. I want to explore that moment "
+         "through a short, realistic film. The location is beneath a flyover at a U-turn, on a raised planting bed "
          "containing soil, with a few bags, covers and basic cooking utensils, not a tent. Use a fictional child. "
          "Distinguish the observed moment from creative additions; do not invent a backstory or assert that scrolling "
-         "caused his poverty. The location reference @underpass is a user-supplied AI-generated image, not a photograph "
-         "of the actual incident; use its night lighting as the visual reference.")
+         "caused his poverty. Set the film at night: this is a creative choice, not confirmed as part of the observed "
+         "incident. The supplied @underpass image is AI-generated, not a photograph of the actual incident; use it only as "
+         "a mood and night-lighting reference. Its layout is not approved for video and does not change the setting above. "
+         "The final location reference will be chosen before any video generation.")
 
 LIGHT = "warm sodium streetlight glancing off concrete pillars and asphalt, deep shadow under the flyover, cool blue-black sky"
-UNDERPASS_DESC = ("Night beneath a concrete flyover on round pillars: a few bags, bedding and steel cooking pots at the base of "
-                  "a pillar by the roadside; warm sodium streetlight, deep shadow, the road beside it.")
+UNDERPASS_DESC = ("Mood and night-lighting reference only (layout not approved for video): concrete flyover pillars under warm "
+                  "sodium streetlight, deep shadow beneath the deck, blue-black sky.")
 
 project = {
     "label": "Demo project data: the brief and decisions are the project owner's; nothing here is model output.",
@@ -42,7 +44,11 @@ project = {
         "Do not suggest that scrolling, or the phone, caused his poverty.",
         "Location: beneath a flyover at a U-turn, on a raised planting bed of soil with a few bags, covers and basic "
         "cooking utensils; not a tent.",
-        "Night. The supplied @underpass image (AI-generated, not a photo of the incident) is the lighting reference.",
+        "Night is a creative choice; it is not confirmed as part of the observed incident.",
+        "The supplied @underpass image (AI-generated, not a photo of the incident) is a mood and night-lighting reference "
+        "only. Its layout (tarp shelter, concrete kerb instead of a soil bed, extra belongings, readable signs, no U-turn) is "
+        "NOT approved for video; this mismatch is unresolved. Keep the setting from the brief.",
+        "The final location reference will be chosen before any video generation.",
         "The first video uses only @boy and @underpass; the smartphone is described in the action (a separate phone "
         "asset is deferred).",
     ],
@@ -69,7 +75,6 @@ plan = {
                   "stays close on his absorbed face as headlights keep passing behind him, and leaves the contrast to the "
                   "audience."),
     "observed": [
-        "It was night.",
         "A homeless child squatting beneath a flyover in Hyderabad.",
         "The child wore dirty, torn clothes.",
         "He was deeply absorbed in scrolling reels on a smartphone.",
@@ -79,7 +84,7 @@ plan = {
     ],
     "creative_additions": [
         "The boy is fictional: his age (about 10), build, hair and clothing colours are invented.",
-        "Lighting follows the supplied AI-generated location image: " + LIGHT + ".",
+        "Night (a creative choice, not confirmed as observed); lighting mood from the supplied AI-generated image: " + LIGHT + ".",
         "The phone's cold screen glow on his face.",
         "Occasional vehicles turning, headlights sweeping the pillars; sound design without music.",
         "Camera: a static wide, a slow push-in, a static close-up; shot order and durations.",
@@ -93,6 +98,11 @@ plan = {
         "Dignity: no staged squalor beyond what was observed, no exaggerated dirt or distress, no begging or pleading to camera.",
         "No real apps, brands, logos, creators or readable text on the phone or in the surroundings.",
         "Observational: no slow motion and no music telling the audience what to feel.",
+    ],
+    "open_questions": [
+        "Location reference: the supplied image's layout (tarp shelter, concrete kerb, extra belongings, readable signs, no "
+        "U-turn) doesn't match the brief; choose the final reference before any video.",
+        "Night is a creative choice unless you confirm it was observed.",
     ],
     "scene": {"name": "1 · Under the flyover, U-turn, night"},
     "assets": [
@@ -145,9 +155,9 @@ if __name__ == "__main__":
                 {"name": "read", "input": {"path": "/assets/underpass/v1"}}]},
             {"text": "Writing a first plan revision for review.", "calls": [
                 {"name": "write", "input": {"path": "/plan", "patch": plan, "note": "First draft from the brief"}}]},
-            {"text": ("Drafted plan revision {{r:t1c0:plan_revision}} (status: {{r:t1c0:status}}). Observed: the seven points "
-                      "from your brief, kept separate. Added by me: a fictional boy of about 10, the lighting taken from your "
-                      "supplied location image, the phone's glow, occasional vehicles, sound without music and the camera "
+            {"text": ("Drafted plan revision {{r:t1c0:plan_revision}} (status: {{r:t1c0:status}}). Observed: the six points "
+                      "from your brief, kept separate. Added by me: a fictional boy of about 10, night as a creative choice "
+                      "with light taken from your supplied image, the phone's glow, occasional vehicles, sound without music and the camera "
                       "choices. Three night shots, each using only @boy and the existing @underpass: a static wide (5 s), a "
                       "slow push-in from medium to medium close-up (6 s) and a static close-up (5 s). @underpass already "
                       "exists, so only @boy needs an image. The plan waits for your approval; I can't approve it.")},

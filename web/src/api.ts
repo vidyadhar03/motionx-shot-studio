@@ -85,7 +85,7 @@ export type PlanShot = { key: string; title: string; intention?: string; action?
 export type PlanAsset = { handle: string; kind: string; name: string; description: string; source: string;
   required: boolean; image_prompt: string };
 export type PlanContent = { title: string; logline: string; treatment: string; observed: string[];
-  creative_additions: string[]; guardrails: string[]; scene: { name: string }; shots: PlanShot[]; assets: PlanAsset[] };
+  creative_additions: string[]; guardrails: string[]; open_questions?: string[]; scene: { name: string }; shots: PlanShot[]; assets: PlanAsset[] };
 export type Plan = { id: string; project_id: string; revision: number; approved_revision: number | null;
   approved_at: string | null; status: "draft" | "approved" | "changed_since_approval"; content: PlanContent;
   warnings: Record<string, { code: string; message: string }[]>;

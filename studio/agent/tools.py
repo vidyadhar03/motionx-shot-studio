@@ -49,6 +49,7 @@ PATCH_SCHEMA = {
         "observed": {"type": "array", "items": _STR, "description": "Plan: only what the person reports seeing."},
         "creative_additions": {"type": "array", "items": _STR, "description": "Plan: everything you add."},
         "guardrails": {"type": "array", "items": _STR},
+        "open_questions": {"type": "array", "items": _STR, "description": "Plan: unresolved choices for the person."},
         "scene": {"type": "object", "properties": {"name": _STR}},
         "shots": {"type": "array", "description": "Plan: about three shots.", "items": {"type": "object", "properties": {
             "key": _STR, "title": _STR, "intention": _STR, "action": _STR, "framing": _STR, "end_framing": _STR,

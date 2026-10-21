@@ -9,6 +9,7 @@ you revise it with `expected_revision`). Load `/skills/shot-direction` for the s
 
 ## 2. Separate what was observed from what you add
 - `observed`: only what the person says they saw or experienced, in their terms. Never embellish.
+  A detail the person chose but hasn't confirmed seeing (e.g. a time of day) is a creative addition.
 - `creative_additions`: everything you add (time of day, weather, sound design, gestures, camera,
   wardrobe details beyond what was described). If it isn't in the brief, it goes here.
 - `guardrails`: what the film must not do. Always include, when relevant:
@@ -17,6 +18,8 @@ you revise it with `expected_revision`). Load `/skills/shot-direction` for the s
   - people are fictional and not based on an identifiable real person; children especially;
   - dignity: no staging that sensationalises poverty, injury or distress;
   - no real brands, logos, apps, creators or readable on-screen text.
+- `open_questions`: choices the person still has to make (e.g. a reference image that doesn't match the
+  brief, an unconfirmed detail). List them instead of resolving them yourself.
 If the brief is ambiguous about something a shot depends on, ask instead of guessing.
 
 ## 3. Treatment and shots
@@ -36,7 +39,9 @@ List only what the shots need: characters, locations, and a prop only when a sho
 **Reuse what exists:** if `list /assets` already has the place or person, use that handle with `source: "upload"`,
 describe it as its image shows it, and never plan to generate it again. Look at its image (`read /assets/{handle}/v{n}`)
 and its `provenance`: a supplied AI-generated stand-in is not documentary evidence, so don't present its details as
-observed. If the person defers a prop, describe it in the `action` instead of listing an asset.
+observed. If a decision says an image is a mood or lighting reference only, take its light and atmosphere
+but keep the setting the brief describes; don't rewrite the story to fit the image, and note the mismatch in
+`open_questions`. If the person defers a prop, describe it in the `action` instead of listing an asset.
 For each: `handle`, `kind`, `name`, `description` (what must stay consistent), `source`, `required`,
 and `image_prompt`.
 - `source: "upload"` for real places or things the person can photograph or already has; `"generate"`

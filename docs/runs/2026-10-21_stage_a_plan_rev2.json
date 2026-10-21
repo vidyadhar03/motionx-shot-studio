@@ -1,0 +1,110 @@
+{
+  "source": "Gemini gemini-3.8-flash, live run 2 (demo Stage A), plan revision 2, author agent, status draft (not approved)",
+  "plan": {
+    "assets": [
+      {
+        "description": "Fictional homeless boy, around 9-11 years old, wearing dirty, torn casual clothes. Neutral expression, unidentifiable, no logos or branded text.",
+        "handle": "boy",
+        "image_prompt": "Full-body studio-lit photographic character reference of a fictional 10-year-old Indian boy, standing in a neutral pose facing camera against a neutral grey studio background. Wearing dirty, worn, and torn oversized dark t-shirt and faded shorts. Photorealistic, soft even lighting, clear facial features, completely unbranded clothing, no logos or text.",
+        "kind": "character",
+        "name": "Boy",
+        "required": true,
+        "source": "generate"
+      },
+      {
+        "description": "Concrete flyover pillars and deck at a U-turn junction with a raised soil planting bed beneath, minimal belongings (bags, covers, basic cooking utensils, no tent), warm sodium lighting and deep shadows.",
+        "handle": "underpass",
+        "image_prompt": "Empty eye-level architectural photograph beneath a massive concrete highway flyover at a wide road U-turn at night. A raised curbed planting bed filled with dark soil sits between massive concrete pillars, with a few folded covers, cloth bags, and basic metal cooking pots neatly placed on the earth, no tent or tarp structure. Lit by distant amber sodium streetlights casting long shadows, asphalt road surface visible. Clear of people, unbranded, no readable signs or text.",
+        "kind": "location",
+        "name": "Flyover U-turn",
+        "required": true,
+        "source": "upload"
+      }
+    ],
+    "creative_additions": [
+      "Setting the incident at night with sodium vapor streetlights and deep ambient shadows.",
+      "Specific ambient diegetic audio: distant night traffic rumbling, engine hum, soft rhythmic audio murmurs from the smartphone screen, no music.",
+      "Shot progression and camera choreography: opening on wide urban environment before moving to closer observational frames.",
+      "The boy's subtle physical gestures while absorbed in scrolling (slight thumb flick, head tilt, eyes reflecting screen light)."
+    ],
+    "guardrails": [
+      "The child is fictional and must not resemble any identifiable real child.",
+      "No invented backstory explaining how or why the child is homeless.",
+      "No causal suggestion that scrolling reels or smartphone usage caused his poverty.",
+      "Observational dignity: no sensationalism or melodrama.",
+      "No real brands, app interfaces, creator logos, or readable on-screen text.",
+      "No non-diegetic background music."
+    ],
+    "logline": "Beneath a concrete city flyover at night, a homeless boy sits absorbed in the glowing reels of a smartphone amid his minimal belongings.",
+    "observed": [
+      "A homeless child squatting beneath a flyover in Hyderabad.",
+      "The child wore dirty, torn clothes.",
+      "The child was deeply absorbed in scrolling reels on a smartphone.",
+      "The location was beneath a flyover at a U-turn, on a raised planting bed containing soil.",
+      "Minimal belongings present: a few bags, covers, and basic cooking utensils; no tent."
+    ],
+    "open_questions": [
+      "The supplied @underpass v1 reference is an AI-generated mood/lighting reference whose layout (tarp shelter, concrete curb, readable signs) does not match the brief's raised soil planting bed without a tent; how and when will the final location reference be provided or generated prior to video generation?",
+      "Specific age range and appearance choices for the fictional boy asset before image generation is proposed."
+    ],
+    "scene": {
+      "name": "Beneath the Flyover"
+    },
+    "shots": [
+      {
+        "action": "0-3s: Wide view beneath the towering concrete flyover near the curved asphalt U-turn. Distant vehicle headlights sweep brief amber reflections across the road. On the raised soil planting bed between the concrete pillars, @boy squats quietly in dirty, torn clothes next to a few cloth bags and metal pots. 3-6s: The camera holds as a faint cool glow illuminates his face in the shadow.",
+        "assets": [
+          "boy",
+          "underpass"
+        ],
+        "audio": "Low continuous rumble of distant flyover traffic, occasional passing vehicle whoosh, night city hum, no music.",
+        "camera_detail": "Completely stationary observational shot.",
+        "camera_move": "static",
+        "duration_s": 6,
+        "framing": "wide",
+        "intention": "Establish the scale of the concrete infrastructure and place the solitary child in his immediate physical environment.",
+        "key": "s1",
+        "lens_look": "clean",
+        "lighting": "low_key_night",
+        "title": "The Flyover Bed"
+      },
+      {
+        "action": "0-3s: Framing @boy from the side as he squats on the raised soil bed, hunched slightly forward. His hands grip a generic slim smartphone horizontally and vertically, fingers resting near the edges. 3-5s: The variable light of changing short videos flickers gently across his dirty shirt and focused face.",
+        "assets": [
+          "boy",
+          "underpass"
+        ],
+        "audio": "Muffled tinny audio fragments from the smartphone speaker, distant city traffic hiss, no music.",
+        "camera_detail": "Slow, steady creep inward toward the boy, settling on his upper body and posture.",
+        "camera_move": "push_in",
+        "duration_s": 5,
+        "end_framing": "medium_close",
+        "framing": "medium",
+        "intention": "Observe the child's deep absorption and the contrast between the cold concrete surroundings and the phone screen.",
+        "key": "s2",
+        "lens_look": "clean",
+        "lighting": "practicals",
+        "title": "Absorbed in the Screen"
+      },
+      {
+        "action": "0-3s: Tight on @boy's profile and eyes in the darkness beneath the flyover. Cool blue and white flicker from the phone screen illuminates his cheek and steady gaze. 3-5s: His thumb flicks upwards along the smartphone edge, scrolling past another video as the glow shifts subtly.",
+        "assets": [
+          "boy",
+          "underpass"
+        ],
+        "audio": "Soft digital swipe swish and low tinny phone chatter, distant engine hum, night breeze, no music.",
+        "camera_detail": "Held steady on his profile and absorbed expression.",
+        "camera_move": "static",
+        "duration_s": 5,
+        "framing": "close_up",
+        "intention": "Focus closely on the intense immersion and disconnection from the immediate physical reality.",
+        "key": "s3",
+        "lens_look": "clean",
+        "lighting": "practicals",
+        "title": "The Screen Glow"
+      }
+    ],
+    "title": "Under the Flyover",
+    "treatment": "Night beneath a massive concrete flyover at a Hyderabad U-turn. Sodium streetlights cast long amber beams across the road, leaving the deep underpass in heavy shadow. On a raised soil planting bed beside a massive pillar, a homeless boy sits in worn, dirty clothes beside his minimal possessions—a few bags, folded covers, and basic cooking utensils. In his hands, a glowing smartphone screen plays endless scrolling reels, its shifting cool light dancing across his focused expression. Distant traffic rumbles past as he remains entirely engrossed in the virtual stream, oblivious to the towering concrete world around him."
+  }
+}

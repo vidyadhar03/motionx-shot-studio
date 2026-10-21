@@ -56,6 +56,7 @@ The app enforces this through `.env`: `STUDIO_MAX_PAID_ATTEMPTS=1` and `STUDIO_B
 | Authorisation | Limits | Status |
 |---|---|---|
 | 2026-10-20, one bounded test | Gemini `gemini-3.8-flash` only, ≤ 8 model requests, 2,048 output tokens per request, thinking `low`, ≤ $0.10, no retries, no repeat sessions | **Used: 5 requests.** Live calls are disabled again (`STUDIO_AGENT_MAX_LIVE_REQUESTS=0`, budget 0) pending review |
+| 2026-10-21, demo Stage A (planning only) | Gemini `gemini-3.8-flash` only, one session, ≤ 8 model requests, $0.15 estimate-based cap, 4,096 output tokens, thinking `low`, no retries/fallback/cap increases, no image or video, no plan approval | **Used: 6 requests, calculated $0.033141.** Live calls disabled again (defaults: scripted, budget 0, 0 requests) pending review |
 
 ### Live run 1: 2026-10-20 ~03:18–03:19 local, isolated project `data-live1` (synthetic assets, fake video adapter)
 
@@ -125,3 +126,46 @@ The app enforces this through `.env`: `STUDIO_MAX_PAID_ATTEMPTS=1` and `STUDIO_B
 - Fixed offline: raw usage is now stored, and billable input = max(input + tool_use, total − output − thought).
 
 **Reload.** After a page reload and a server restart: 5 requests, 23 provider items, 8 tool calls, 2 shot revisions, 3 proposals, 1 take, $0.010153, all identical. A further send on the thread was refused before any network call: `live calls are disabled: STUDIO_AGENT_MAX_LIVE_REQUESTS is 0`.
+
+### Live run 2 (demo Stage A): 2026-10-21 11:03:16–11:04:12 UTC, `data-flyover-live`
+
+**Setup.**
+- Data folder seeded offline with:
+  - the corrected brief: night as a creative choice; the image as a mood/lighting reference only;
+  - 8 decisions;
+  - @underpass v1: the owner's AI-generated image, imported unchanged with provenance.
+- Fake video adapter, Comfy key blanked, video and image caps 0.
+- Exact request: `scripts/demo.py` `REQUEST_PLAN`, sent once to a new thread.
+- The hand-written mock plan lives only in `demo/flyover/` and is unreachable through the agent's tools. It was not given to the agent.
+
+**What happened (6 requests, 9 tool calls, stop = model finished).**
+
+| Request | Tool calls |
+|---|---|
+| 1 | `read /skills/film-planning`, `read /decisions`, `read /assets/underpass/v1` (image attached) |
+| 2 | `read /`, `read /plan` (error: no plan yet), `read /skills/shot-direction` |
+| 3 | `list /assets` |
+| 4 | `write /plan` → revision 1, draft. The app warned that s2 `camera_detail` restated the push-in |
+| 5 | `write /plan` (`expected_revision` 1) → revision 2, draft: that warning fixed |
+| 6 | final message, no tools |
+
+**Result.**
+- Plan revision 2, **draft**, not approved.
+- 0 shots, 0 requirements, 0 asset generations, 0 proposals, 0 takes.
+
+**Usage (reported by Gemini; calculated at list price, `gemini.v2`).**
+
+| Request | Input | Output | Thought | Tool use | Pre-call estimate | Calculated |
+|---|---|---|---|---|---|---|
+| 1 | 2,162 | 56 | 0 | 0 | $0.0325 | $0.001831 |
+| 2 | 3,300 | 48 | 0 | 0 | $0.0355 | $0.002655 |
+| 3 | 3,366 | 15 | 0 | 0 | $0.0379 | $0.002581 |
+| 4 | 3,387 | 1,536 | 0 | 0 | $0.0381 | $0.008300 |
+| 5 | 4,929 | 1,544 | 0 | 0 | $0.0397 | $0.009487 |
+| 6 | 6,479 | 914 | 0 | 0 | $0.0413 | $0.008287 |
+| **Total** | 23,623 | 4,113 | 0 | 0 | – | **$0.033141** |
+
+**Notes.**
+- Gemini reported 0 thought tokens and 0 tool-use tokens on every request, although thinking was `low` and tool results were sent.
+- The cap was never the limiting factor: the highest spent-plus-estimate was about $0.065, against $0.15.
+- The real charge must be confirmed in the Google billing console. Nothing is recorded as confirmed.

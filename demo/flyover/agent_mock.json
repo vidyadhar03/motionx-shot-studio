@@ -51,7 +51,6 @@
                   "logline": "At night beneath a Hyderabad flyover, a boy squats on a strip of soil, absorbed in a phone, while the traffic turns around him.",
                   "treatment": "Night beneath a concrete flyover. Now and then a vehicle swings through the U-turn, its headlights sliding across the pillars. On a raised planting bed of bare soil at the base of a pillar, a few bags, covers and cooking utensils mark where someone stays; there is no tent. A boy squats on the soil in dirty, torn clothes, bent over a smartphone, scrolling short videos, its glow on his face against the orange streetlight. The film watches without explaining: engines echoing under the deck, the thin sound of the reels, the small movement of his thumb. We don't learn who he is or how he came to be here. The last shot stays close on his absorbed face as headlights keep passing behind him, and leaves the contrast to the audience.",
                   "observed": [
-                    "It was night.",
                     "A homeless child squatting beneath a flyover in Hyderabad.",
                     "The child wore dirty, torn clothes.",
                     "He was deeply absorbed in scrolling reels on a smartphone.",
@@ -61,7 +60,7 @@
                   ],
                   "creative_additions": [
                     "The boy is fictional: his age (about 10), build, hair and clothing colours are invented.",
-                    "Lighting follows the supplied AI-generated location image: warm sodium streetlight glancing off concrete pillars and asphalt, deep shadow under the flyover, cool blue-black sky.",
+                    "Night (a creative choice, not confirmed as observed); lighting mood from the supplied AI-generated image: warm sodium streetlight glancing off concrete pillars and asphalt, deep shadow under the flyover, cool blue-black sky.",
                     "The phone's cold screen glow on his face.",
                     "Occasional vehicles turning, headlights sweeping the pillars; sound design without music.",
                     "Camera: a static wide, a slow push-in, a static close-up; shot order and durations.",
@@ -75,6 +74,10 @@
                     "Dignity: no staged squalor beyond what was observed, no exaggerated dirt or distress, no begging or pleading to camera.",
                     "No real apps, brands, logos, creators or readable text on the phone or in the surroundings.",
                     "Observational: no slow motion and no music telling the audience what to feel."
+                  ],
+                  "open_questions": [
+                    "Location reference: the supplied image's layout (tarp shelter, concrete kerb, extra belongings, readable signs, no U-turn) doesn't match the brief; choose the final reference before any video.",
+                    "Night is a creative choice unless you confirm it was observed."
                   ],
                   "scene": {
                     "name": "1 · Under the flyover, U-turn, night"
@@ -95,7 +98,7 @@
                       "name": "Flyover (night)",
                       "source": "upload",
                       "required": true,
-                      "description": "Night beneath a concrete flyover on round pillars: a few bags, bedding and steel cooking pots at the base of a pillar by the roadside; warm sodium streetlight, deep shadow, the road beside it.",
+                      "description": "Mood and night-lighting reference only (layout not approved for video): concrete flyover pillars under warm sodium streetlight, deep shadow beneath the deck, blue-black sky.",
                       "image_prompt": ""
                     }
                   ],
@@ -155,7 +158,7 @@
           ]
         },
         {
-          "text": "Drafted plan revision {{r:t1c0:plan_revision}} (status: {{r:t1c0:status}}). Observed: the seven points from your brief, kept separate. Added by me: a fictional boy of about 10, the lighting taken from your supplied location image, the phone's glow, occasional vehicles, sound without music and the camera choices. Three night shots, each using only @boy and the existing @underpass: a static wide (5 s), a slow push-in from medium to medium close-up (6 s) and a static close-up (5 s). @underpass already exists, so only @boy needs an image. The plan waits for your approval; I can't approve it."
+          "text": "Drafted plan revision {{r:t1c0:plan_revision}} (status: {{r:t1c0:status}}). Observed: the six points from your brief, kept separate. Added by me: a fictional boy of about 10, night as a creative choice with light taken from your supplied image, the phone's glow, occasional vehicles, sound without music and the camera choices. Three night shots, each using only @boy and the existing @underpass: a static wide (5 s), a slow push-in from medium to medium close-up (6 s) and a static close-up (5 s). @underpass already exists, so only @boy needs an image. The plan waits for your approval; I can't approve it."
         }
       ]
     },

@@ -47,7 +47,7 @@ def validate_plan(content: dict[str, Any]) -> tuple[dict[str, Any], dict[str, li
     """Normalise a plan and check it. Raises ValueError with what to fix; returns (plan, warnings per shot)."""
     if not isinstance(content, dict):
         raise ValueError("a plan is an object")
-    unknown = set(content) - {"title", "logline", "treatment", "observed", "creative_additions", "guardrails",
+    unknown = set(content) - {"title", "logline", "treatment", "observed", "creative_additions", "guardrails", "open_questions",
                               "scene", "shots", "assets"}
     if unknown:
         raise ValueError(f"unknown plan field(s): {', '.join(sorted(unknown))}")
@@ -58,6 +58,7 @@ def validate_plan(content: dict[str, Any]) -> tuple[dict[str, Any], dict[str, li
         "observed": _lines(content.get("observed"), "observed"),
         "creative_additions": _lines(content.get("creative_additions"), "creative_additions"),
         "guardrails": _lines(content.get("guardrails"), "guardrails"),
+        "open_questions": _lines(content.get("open_questions"), "open_questions"),
     }
     scene = content.get("scene") or {}
     plan["scene"] = {"name": _text(scene.get("name") if isinstance(scene, dict) else None, "scene.name", 120,

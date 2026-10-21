@@ -27,11 +27,13 @@ PROJECT = json.loads((DEMO / "project.json").read_text())
 
 # Stage A uses exactly this text (see docs/DEMO_APPROVAL_BRIEF.md).
 REQUEST_PLAN = ("Draft a short-film plan from the brief for my review: a compact treatment and about three night shots. "
-                "The location already exists as @underpass v1, a user-supplied AI-generated image (not a photograph of the "
-                "actual incident); reuse that handle, use its night lighting as the visual reference, and don't plan to "
-                "generate it. Use only @boy and @underpass in the shots, and describe the smartphone in the action rather "
-                "than as a separate asset. Keep what I observed separate from your additions. Write the plan as a draft "
-                "and stop: don't propose any image or video generation.")
+                "Read the brief, the decisions, the film-planning skill and the supplied @underpass v1 image. That image is "
+                "a user-supplied AI-generated mood and night-lighting reference only, not a photograph of the actual "
+                "incident; its layout is not approved for video. Keep the setting from the brief: a raised soil planting "
+                "bed beneath the flyover at a U-turn, minimal belongings, no tent, and list the image mismatch as "
+                "unresolved. Night is a creative choice, not an observed fact. Use only @boy and @underpass in the shots "
+                "and describe the smartphone in the action. Keep what I observed separate from your additions. Write the "
+                "plan as a draft and stop: don't propose any image or video generation.")
 REQUEST_ASSETS = "The plan is approved. Prepare the assets: propose images only for assets marked generate."
 REQUEST_VIDEO = "Propose the first video for shot 1 of the approved plan."
 STEPS = ["1 idea, brief and the supplied location", "2 agent proposes a plan (mocked)", "3 human approves the plan",
