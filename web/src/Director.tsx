@@ -1,19 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AgentCall, AgentThread, api, AssetGen, Shot, ThreadView } from "./api";
-import { newConversationLabel, orderedShots, threadSendState } from "./derive";
+import { AgentCall, AgentThread, api, Asset, AssetGen, Shot, ThreadView } from "./api";
+import { orderedShots, threadSendState } from "./derive";
 import Markdown from "./Markdown";
+import { ImageProposalCard, VideoProposalCard } from "./ProposalCards";
 import { useStudio } from "./store";
-import { fmtDate, fmtDateTime, Pill } from "./ui";
+import { fmtDate, fmtDateTime, Menu, MenuItem, Pill } from "./ui";
 
 const PROVIDER_NAME: Record<string, string> = { gemini: "Gemini", anthropic: "Claude", scripted: "Offline stand-in", replay: "Mock replay" };
-const providerLabel = (t: { provider: string; model: string }) => (t.provider === "scripted" || t.provider === "replay" ? PROVIDER_NAME[t.provider] : `${PROVIDER_NAME[t.provider] ?? t.provider} ${prettyModel(t.model)}`);
 const prettyModel = (m: string) => m.replace(/^gemini-/, "").replace(/^claude-/, "").replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+const providerLabel = (t: { provider: string; model: string }) => (t.provider === "scripted" || t.provider === "replay" ? PROVIDER_NAME[t.provider] : `${PROVIDER_NAME[t.provider] ?? t.provider} ${prettyModel(t.model)}`);
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
-type Entry = { at: string; key: string; msg?: ThreadView["messages"][number]; call?: AgentCall };
-type Block = { key: string; msg?: ThreadView["messages"][number]; calls?: AgentCall[]; proposal?: AgentCall };
+type Block = { key: string; msg?: ThreadView["messages"][number]; calls?: AgentCall[]; proposal?: { call: AgentCall; changes: string[] } };
+type Live = { shots: Map<string, Shot>; gens: AssetGen[]; assets: Asset[] };
 
-/** The conversation with the director. It lives in the shared right-hand slot, stays mounted when the slot shows
- *  something else (threads and unsent drafts survive), and only ever reads old threads: opening one runs nothing. */
+/** The conversation with the director: the primary way to work on a shot. It lives in the shared right-hand slot,
+ *  stays mounted when the slot shows something else (threads and unsent drafts survive), and only ever reads old
+ *  threads: opening or reloading one sends nothing and runs nothing. Only an explicit Send starts a bounded turn. */
 export default function Director({ onClose }: { onClose: () => void }) {
   const S = useStudio();
   const { project, agentCfg: config, overview, fail } = S;
@@ -23,9 +26,10 @@ export default function Director({ onClose }: { onClose: () => void }) {
   const [loaded, setLoaded] = useState(false);
   const [text, setTextState] = useState("");
   const [busy, setBusy] = useState(false);
-  const [live, setLive] = useState<{ shots: Map<string, Shot>; gens: AssetGen[] }>({ shots: new Map(), gens: [] });
+  const [live, setLive] = useState<Live>({ shots: new Map(), gens: [], assets: [] });
   const logRef = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
+  const sendId = useRef<string | null>(null);
 
   const setText = useCallback((v: string) => { setTextState(v); S.drafts.current.set(pid, v); }, [pid, S.drafts]);
   useEffect(() => {                                                  // another project: its own threads and its own unsent draft
@@ -34,145 +38,163 @@ export default function Director({ onClose }: { onClose: () => void }) {
     api.threads(pid).then((ts) => { setThreads(ts); if (ts[0]) return api.thread(ts[0].id).then(setView); }).catch(fail).finally(() => setLoaded(true));
   }, [pid]);                                                          // eslint-disable-line react-hooks/exhaustive-deps
 
-  // A request with no conversation to put it in starts an (empty, local) conversation first. Still nothing is sent.
-  const started = useRef(0);
-  useEffect(() => {
-    const p = S.prefill;
-    if (!p || !loaded || view || started.current === p.nonce) return;
-    started.current = p.nonce;
-    newThread();
-  }, [S.prefill, loaded, view]);                                      // eslint-disable-line react-hooks/exhaustive-deps
-
-  // "Revise with director" and friends only fill the box. Nothing is sent until the person presses Send.
-  const seen = useRef(0);
-  useEffect(() => {
-    const p = S.prefill;
-    if (!p || p.nonce === seen.current || !view) return;
-    seen.current = p.nonce;
-    setTextState((cur) => { const next = cur.trim() && cur.trim() !== p.text.trim() ? `${cur.trimEnd()}\n\n${p.text}` : p.text; S.drafts.current.set(pid, next); return next; });
-    setTimeout(() => { box.current?.focus(); box.current?.setSelectionRange(box.current.value.length, box.current.value.length); }, 50);
-  }, [S.prefill, pid, !!view]);                                       // eslint-disable-line react-hooks/exhaustive-deps
-
-  const ordered = useMemo(() => (overview && project ? orderedShots(overview.shots, project.scenes) : []), [overview, project]);
-  const focus = S.section === "shots" && S.item ? ordered.find((s) => s.id === S.item) ?? null : null;
-  const focusLabel = focus ? `Shot ${ordered.indexOf(focus) + 1} · ${focus.title || "Untitled"}` : null;
-
-  const open = (id: string) => api.thread(id).then(setView).catch(fail);
   const newThread = async () => {
     const t = await api.createThread(pid).catch(fail);
     if (!t) return;
     setThreads((ts) => [t, ...ts]);
     setView(await api.thread(t.id));
   };
+  const open = (id: string) => api.thread(id).then(setView).catch(fail);
+
+  // "Revise with director" and friends only fill the box. Nothing is sent until the person presses Send.
+  const seen = useRef(0);
+  useEffect(() => {
+    const p = S.prefill;
+    if (!p || p.nonce === seen.current || !loaded) return;
+    seen.current = p.nonce;
+    setTextState((cur) => { const next = cur.trim() && cur.trim() !== p.text.trim() ? `${cur.trimEnd()}\n\n${p.text}` : p.text; S.drafts.current.set(pid, next); return next; });
+    setTimeout(() => { box.current?.focus(); box.current?.setSelectionRange(box.current.value.length, box.current.value.length); }, 50);
+  }, [S.prefill, pid, loaded]);                                       // eslint-disable-line react-hooks/exhaustive-deps
+
+  const ordered = useMemo(() => (overview && project ? orderedShots(overview.shots, project.scenes) : []), [overview, project]);
+  const focus = S.section === "shots" && S.item ? ordered.find((s) => s.id === S.item) ?? null : null;
+  const focusLabel = focus ? `Shot ${ordered.indexOf(focus) + 1} · ${focus.title || "Untitled"}` : null;
+
+  const thread = view?.thread ?? null;
+  const eff = thread ?? (config ? { provider: config.provider, model: config.model } : null);       // a first message starts a conversation with the default
+  const liveInThread = (view?.usage ?? []).filter((u) => u.live).length;
+  const send_ = eff ? threadSendState(eff, config, liveInThread) : null;
+  const blocked = send_?.kind === "live_locked";
+
   const send = async () => {
-    if (!view || !text.trim()) return;
+    if (!text.trim() || busy || blocked) return;
+    sendId.current ??= uid();                                         // one id per message: a retry of this send is never run twice
+    const id = sendId.current;
     setBusy(true);
     try {
-      setView(await api.sendAgent(view.thread.id, text.trim(), focus?.id ?? null));
-      setText("");
+      let v = view;
+      if (!v) {                                                       // the first message creates the conversation (a local record), then sends
+        const t = await api.createThread(pid);
+        setThreads((ts) => [t, ...ts]);
+        v = await api.thread(t.id);
+      }
+      setView(await api.sendAgent(v.thread.id, text.trim(), focus?.id ?? null, id));
+      setText(""); sendId.current = null;
       await S.reload();
     } catch (e) { fail(e); } finally { setBusy(false); }
   };
+  const stop = () => { if (view) api.cancelAgent(view.thread.id).catch(fail); };
 
-  // Current state of the proposals this thread mentions, read live (never rewriting the old messages).
+  // Current state of everything this conversation (or this shot) refers to, read live. Old messages never change.
+  const focusId = focus?.id ?? null;
+  const [tick, setTick] = useState(0);
+  const imagesRunning = live.gens.some((g) => ["approved", "submitting", "running"].includes(g.status));
+  useEffect(() => {                                                   // an image in flight: follow it (the card shows its current status)
+    if (!imagesRunning) return;
+    const h = setInterval(() => setTick((n) => n + 1), 1200);
+    return () => { clearInterval(h); setTick((n) => n + 1); S.reload(); };
+  }, [imagesRunning]);                                                // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (!view) return;
-    const shotIds = [...new Set(view.tool_calls.filter((c) => c.name === "propose_generation" && c.input.shot_id).map((c) => String(c.input.shot_id)))];
-    const hasAsset = view.tool_calls.some((c) => c.name === "propose_generation" && c.input.asset);
+    const ids = new Set<string>(view ? view.tool_calls.filter((c) => c.name === "propose_generation" && c.input.shot_id).map((c) => String(c.input.shot_id)) : []);
+    if (focusId) ids.add(focusId);
+    const hasAsset = !!view?.tool_calls.some((c) => c.name === "propose_generation" && c.input.asset);
     let dead = false;
-    Promise.all([Promise.all(shotIds.map((id) => api.shot(id).catch(() => null))), hasAsset ? api.assetGens(pid).catch(() => []) : Promise.resolve([])])
-      .then(([shots, gens]) => { if (!dead) setLive({ shots: new Map(shots.filter(Boolean).map((s) => [s!.id, s!])), gens }); });
+    Promise.all([Promise.all([...ids].map((id) => api.shot(id).catch(() => null))), hasAsset ? api.assetGens(pid).catch(() => []) : Promise.resolve([] as AssetGen[]), hasAsset ? api.assets(pid).catch(() => []) : Promise.resolve([] as Asset[])])
+      .then(([shots, gens, assets]) => { if (!dead) setLive({ shots: new Map(shots.filter(Boolean).map((s) => [s!.id, s!])), gens, assets }); });
     return () => { dead = true; };
-  }, [view?.thread.id, view?.tool_calls.length, overview]);                // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view?.thread.id, view?.tool_calls.length, overview, focusId, tick]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const blocks = useMemo<Block[]>(() => {
     if (!view) return [];
-    const entries: Entry[] = [
-      ...view.messages.map((m) => ({ at: m.at, key: `m${m.id}`, msg: m })),
-      ...view.tool_calls.map((c) => ({ at: c.started_at, key: `c${c.id}`, call: c })),
-    ].sort((a, b) => a.at.localeCompare(b.at));
+    type E = { at: string; key: string; msg?: ThreadView["messages"][number]; call?: AgentCall };
+    const entries: E[] = [...view.messages.map((m) => ({ at: m.at, key: `m${m.id}`, msg: m })), ...view.tool_calls.map((c) => ({ at: c.started_at, key: `c${c.id}`, call: c }))]
+      .sort((a, b) => a.at.localeCompare(b.at));
     const out: Block[] = [];
+    let writes: AgentCall[] = [];                                      // the director's edits since the person's last message
     for (const e of entries) {
-      if (e.msg) { out.push({ key: e.key, msg: e.msg }); continue; }
+      if (e.msg) { if (e.msg.kind === "user") writes = []; out.push({ key: e.key, msg: e.msg }); continue; }
       const c = e.call!;
+      if (c.name === "write" && !c.result?.is_error) writes.push(c);
       if (c.name === "propose_generation" && !c.result?.is_error && (c.result?.content.proposal_id || c.result?.content.asset_generation_id)) {
-        out.push({ key: e.key, proposal: c }); continue;
+        const mine = writes.filter((w) => String(w.input.path ?? "").includes(String(c.input.shot_id ?? "\u0000")));
+        const changes = mine.flatMap((w) => Object.entries((w.result?.content.changed ?? {}) as Record<string, { from: unknown; to: unknown }>).map(([k, v]) => `${k}: ${fmt(v.from)} → ${fmt(v.to)}`));
+        out.push({ key: e.key, proposal: { call: c, changes } }); continue;
       }
       const last = out[out.length - 1];
       if (last?.calls) last.calls.push(c); else out.push({ key: e.key, calls: [c] });
     }
     return out;
   }, [view]);
-  useEffect(() => { logRef.current?.scrollTo(0, logRef.current.scrollHeight); }, [blocks.length, view?.thread.id]);
+  useEffect(() => { logRef.current?.scrollTo(0, logRef.current.scrollHeight); }, [blocks.length, view?.thread.id, busy]);
 
-  const thread = view?.thread ?? null;
-  const send_ = thread ? threadSendState(thread, config) : null;
-  const composerBlocked = send_?.kind === "live_locked";
-  const usage = view?.usage ?? [];
-  const liveUse = usage.filter((u) => u.live);
+  const inline = new Set(blocks.flatMap((b) => (b.proposal ? [String(b.proposal.call.result!.content.proposal_id ?? "")] : [])));
+  const focusShot = focusId ? live.shots.get(focusId) : undefined;
+  const pinned = focusShot?.proposals.find((p) => (p.status === "pending" || p.status === "stale") && !inline.has(p.id));
+  const changed = () => { S.reload(); S.reloadStatus(); };
   const lastAt = view?.messages.reduce((m, x) => (x.at > m ? x.at : m), thread?.created_at ?? "") ?? "";
-  const earlier = !!thread && (threads[0]?.id !== thread.id || Date.now() - Date.parse(lastAt) > 30 * 60_000);
+  const earlier = !!thread && threads[0]?.id !== thread.id;
+  const usage = (view?.usage ?? []).filter((u) => u.live);
 
   return (
     <section className="director" aria-label="Director">
       <header className="dir-head">
-        <button className="ghost back" onClick={onClose} aria-label="Close the director and go back">← Back</button>
         <h2>Director</h2>
+        <span className="dir-ctx" title={focusLabel ?? project!.name}>{focusLabel ?? project!.name}</span>
         <div className="spacer" />
-        <button className="small" onClick={newThread}>New conversation</button>
+        <Menu label="⋯" aria-label="Conversation menu">{(close) => (<>
+          <MenuItem onClick={() => { close(); newThread(); }}>New conversation</MenuItem>
+          {threads.length > 0 && <div className="menu-label">Conversations</div>}
+          {threads.map((t, i) => <MenuItem key={t.id} onClick={() => { close(); open(t.id); }}>
+            {t.id === thread?.id ? "✓ " : ""}{i === 0 ? "Latest" : "Earlier"} · {fmtDateTime(t.created_at)} · {providerLabel(t)}</MenuItem>)}
+          {thread && <div className="menu-info">{providerLabel(thread)} · {usage.length} request{usage.length === 1 ? "" : "s"}{usage.length ? ` · $${usage.reduce((s, u) => s + u.est_usd, 0).toFixed(3)} est.` : ""}</div>}
+        </>)}</Menu>
+        <button className="icon-btn" aria-label="Hide director" title="Hide director" onClick={onClose}>✕</button>
       </header>
-      <div className="dir-context">
-        <span className="muted">Talking about</span> <strong>{focusLabel ?? `the whole project · ${project!.name}`}</strong>
-      </div>
-
-      {threads.length > 1 && thread && (
-        <label className="thread-pick"><span className="sr-only">Conversation</span>
-          <select value={thread.id} onChange={(e) => open(e.target.value)}>
-            {threads.map((t, i) => <option key={t.id} value={t.id}>{i === 0 ? "Latest" : "Earlier"} · {fmtDateTime(t.created_at)} · {providerLabel(t)}</option>)}
-          </select></label>
-      )}
-
-      {thread && (
-        <div className="thread-meta">
-          <div><strong>This conversation:</strong> {providerLabel(thread)} · {thread.provider === "scripted" || thread.provider === "replay" ? "offline" : "live model"} · started {fmtDate(thread.created_at)}</div>
-          <div className={`send-state ${send_!.kind}`}>{send_!.text}</div>
-          <div className="muted">New conversations use {newConversationLabel(config)}.</div>
-          {liveUse.length > 0 && (
-            <details className="usage"><summary>Usage · {liveUse.length} live request{liveUse.length === 1 ? "" : "s"} · ${liveUse.reduce((s, u) => s + u.est_usd, 0).toFixed(3)} estimated</summary>
-              <ul>{liveUse.map((u) => <li key={u.id}>{u.model} · {u.input_tokens} in / {u.output_tokens} out · ${u.est_usd.toFixed(4)}</li>)}</ul>
-              <p className="muted">Estimates at list price from provider-reported tokens. Full accounting is in Settings.</p></details>)}
-          {earlier && <div className="note info">Earlier conversation (last message {fmtDateTime(lastAt)}). It may describe things that have since changed; the Overview and Shots screens show the current state.</div>}
-        </div>
-      )}
 
       <div className="dir-log" ref={logRef} tabIndex={0} aria-label="Conversation">
         {!loaded && <p className="muted">Loading…</p>}
-        {loaded && !view && <div className="empty-block"><p><strong>No conversation yet.</strong></p><button className="primary" onClick={newThread}>Start a conversation</button></div>}
-        {view && !blocks.length && <p className="muted">Ask the director to draft a film plan, prepare assets, or apply feedback to the open shot.</p>}
+        {earlier && <div className="dir-earlier">Earlier conversation · {fmtDate(lastAt)}. It may describe things that have since changed.</div>}
+        {loaded && !blocks.length && <p className="muted dir-hint">{focus ? `Tell me what to change in ${focusLabel}, or ask me to apply its feedback. I'll prepare a proposal for you to approve.` : "Ask me to draft a film plan, prepare assets, or revise a shot. I can prepare proposals, but only you can approve them."}</p>}
         {blocks.map((b) => b.msg ? <Message key={b.key} m={b.msg} />
-          : b.proposal ? <ProposalCard key={b.key} c={b.proposal} live={live} S={S} />
+          : b.proposal ? <ProposalFor key={b.key} call={b.proposal.call} changes={b.proposal.changes} live={live} S={S} onChanged={changed} />
           : <Actions key={b.key} calls={b.calls!} />)}
+        {pinned && focusShot && config && S.status && (
+          <div className="pinned"><div className="pin-label">{pinned.status === "pending" ? "Waiting for your approval on this shot" : "An earlier proposal on this shot is out of date"}</div>
+            <VideoProposalCard proposal={pinned} shot={focusShot} status={S.status} onChanged={changed} onOpenShot={() => S.go({ section: "shots", item: focusShot.id })} onOpenTake={() => S.go({ section: "shots", item: focusShot.id })} /></div>)}
+        {busy && <div className="working" role="status"><i className="spin" /> The director is working…<button className="small" onClick={stop}>Stop</button></div>}
       </div>
 
-      {view && (
+      {loaded && (
         <div className="composer">
-          <textarea ref={box} rows={3} value={text} aria-label="Message to the director"
-                    placeholder={focus ? `Ask about ${focusLabel}, e.g. apply the latest feedback` : "Ask about the project: plan, assets, shots…"}
-                    onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !composerBlocked) send(); }} />
+          <textarea ref={box} rows={3} value={text} aria-label="Message to the director" 
+                    placeholder={focus ? `Ask about ${focusLabel}…` : "Ask about the project…"}
+                    onChange={(e) => { setText(e.target.value); sendId.current = null; }} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); }} />
           <div className="composer-foot">
-            <span className="muted">{focus ? `Context: ${focusLabel}` : "Context: whole project"}</span>
+            <span className="muted" title={send_?.text}>{eff ? providerLabel(eff) : ""}{send_?.kind === "live_ok" ? " · live" : ""}</span>
             <div className="spacer" />
             {!text && <button className="small ghost" onClick={() => setText(focus ? `Apply the latest feedback to shot ${focus.id}.` : "Draft a short-film plan from the brief: a compact treatment and about three shots.")}>Use suggestion</button>}
-            <button className="primary small" disabled={busy || !text.trim() || composerBlocked} onClick={send}
-                    title={composerBlocked ? send_?.text : "Send (Ctrl/⌘+Enter)"}>{busy ? "Working…" : "Send"}</button>
+            {busy ? <button className="small" onClick={stop}>Stop</button> : <button className="primary small" disabled={!text.trim() || blocked} onClick={send}
+                    title={blocked ? send_?.text : "Send (Ctrl/⌘+Enter)"}>Send</button>}
           </div>
-          {composerBlocked && (
-            <div className="note warn">{send_!.text} <button className="small" onClick={newThread}>Start a new conversation with {newConversationLabel(config)}</button></div>)}
+          {blocked && <div className="reason">{send_!.text} {view && <button className="small" onClick={newThread}>New conversation</button>}</div>}
         </div>
       )}
     </section>
   );
+}
 
+function ProposalFor({ call, changes, live, S, onChanged }: { call: AgentCall; changes: string[]; live: Live; S: ReturnType<typeof useStudio>; onChanged: () => void }) {
+  const content = call.result!.content;
+  if (content.asset_generation_id) {
+    const g = live.gens.find((x) => x.id === content.asset_generation_id);
+    if (!g) return <div className="pcard"><div className="pc-head"><span className="pc-kind">Image</span><span>@{String(content.asset)}</span><Pill>status unknown</Pill></div></div>;
+    return <ImageProposalCard gen={g} asset={live.assets.find((a) => a.handle === g.handle)} onChanged={onChanged} onOpenAsset={() => S.go({ section: "assets", item: g.handle })} />;
+  }
+  const shot = live.shots.get(String(call.input.shot_id));
+  const p = shot?.proposals.find((x) => x.id === content.proposal_id);
+  if (!shot || !p || !S.status) return <div className="pcard"><div className="pc-head"><span className="pc-kind">Video</span><span>{String(content.proposal_id)}</span><Pill>status unknown</Pill></div></div>;
+  return <VideoProposalCard proposal={p} shot={shot} status={S.status} changes={changes} onChanged={onChanged}
+                            onOpenShot={() => S.go({ section: "shots", item: shot.id })} onOpenTake={() => S.go({ section: "shots", item: shot.id })} />;
 }
 
 function Message({ m }: { m: ThreadView["messages"][number] }) {
@@ -213,34 +235,5 @@ function Call({ c }: { c: AgentCall }) {
 function fmt(v: unknown): string {
   if (v === null || v === undefined || v === "") return "—";
   const s = typeof v === "string" ? v : JSON.stringify(v);
-  return s.length > 90 ? s.slice(0, 90) + "…" : s;
-}
-
-/** A proposal the director made. The message text stays exactly as written; the status chip is read live. */
-function ProposalCard({ c, live, S }: { c: AgentCall; live: { shots: Map<string, Shot>; gens: AssetGen[] }; S: ReturnType<typeof useStudio> }) {
-  const content = c.result!.content;
-  if (content.asset_generation_id) {
-    const g = live.gens.find((x) => x.id === content.asset_generation_id);
-    const status = !g ? "unknown" : g.status === "pending" ? "Waiting for your approval" : g.asset_version_id ? "Image made" : g.status;
-    return (
-      <div className="prop-card">
-        <div className="pc-head"><strong>Image proposal · @{String(content.asset)}</strong><Pill tone={g?.status === "pending" ? "accent" : "muted"}>{status}</Pill></div>
-        <div className="muted">About {String(content.est_credits)} cr on the real route · {String(content.settings?.size_preset ?? "")}</div>
-        <button className="small" onClick={() => S.go({ section: "assets", item: String(content.asset) })}>Open asset</button>
-      </div>
-    );
-  }
-  const shot = live.shots.get(String(c.input.shot_id));
-  const p = shot?.proposals.find((x) => x.id === content.proposal_id);
-  const take = p && shot?.takes.find((t) => t.proposal_id === p.id);
-  const label = !shot ? "unknown" : !p ? "unknown" : p.status === "pending" ? "Waiting for your approval" : p.status === "stale" ? "Out of date" : p.status === "rejected" ? "Rejected"
-    : take ? `Approved → take ${take.number}${shot.selected_take_id === take.id ? " (selected)" : ""}` : "Approved";
-  const tone = p?.status === "pending" ? "accent" : p?.status === "approved" ? "ok" : p?.status === "rejected" ? "bad" : p?.status === "stale" ? "warn" : "muted";
-  return (
-    <div className="prop-card">
-      <div className="pc-head"><strong>Video proposal{shot ? ` · ${shot.title}` : ""}</strong><Pill tone={tone}>{label}</Pill></div>
-      <div className="muted">About {String(content.est_credits)} cr on the real route · proposed by the director</div>
-      {shot && <button className="small" onClick={() => S.go({ section: "shots", item: shot.id })}>Open shot</button>}
-    </div>
-  );
+  return s.length > 60 ? s.slice(0, 60) + "…" : s;
 }

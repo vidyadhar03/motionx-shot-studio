@@ -23,7 +23,8 @@ from .media import MediaError, MediaStore
 from .ops import FEEDBACK_REASONS, ConflictError, NotFoundError, Ops
 from .worker import Dispatcher
 from .export import Exporter, ExportIntegrityError
-from .agent.loop import AgentBudgetError, AgentRunner
+from .agent.loop import AgentBudgetError, AgentBusyError, AgentRunner
+from .limits import LimitError, Limits
 from .agent.providers.base import ProviderConfigError
 from .agent.store import AgentStore
 from .assetgen import AssetGenerations
@@ -104,6 +105,11 @@ class ThreadIn(BaseModel):
 class AgentMessageIn(BaseModel):
     text: str
     focus_shot_id: str | None = None
+    client_id: str | None = None       # one per click: a repeated id is not sent twice
+
+
+class LimitsIn(BaseModel):
+    limits: dict[str, float | int | None]
 
 
 class ResolveIn(BaseModel):
@@ -156,6 +162,7 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     service = GenerationService(db, ops, media, adapter, settings, balance_fn=balance_fn)
     agent = AgentRunner(settings, ops, service, media, AgentStore(db))
     planning = Planning(db, ops)
+    limits = Limits(db, settings)
     assetgen = AssetGenerations(db, ops, media, adapter, settings, balance_fn=balance_fn)
     image_tasks: set = set()
 
@@ -205,6 +212,14 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     async def _ei(_: Request, e: ExportIntegrityError):
         return err(409, e)
 
+    @app.exception_handler(AgentBusyError)
+    async def _busy(_: Request, e: AgentBusyError):
+        return err(409, e)
+
+    @app.exception_handler(LimitError)
+    async def _le(_: Request, e: LimitError):
+        return err(409, e)
+
     @app.exception_handler(AgentBudgetError)
     async def _ab(_: Request, e: AgentBudgetError):
         return err(402, e)
@@ -221,16 +236,37 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     async def _ve(_: Request, e: ValueError):
         return err(400, e)
 
+    # -- readiness (what can happen, and what is wrong) -------------------------------------------
+    def generation_state(b: dict, versions: dict) -> dict:
+        """Paid generation is always approved one concrete proposal at a time by a person. This reports whether the
+        app is able to run an approved one, and why not."""
+        if not adapter.is_paid:
+            return {"mode": "fake", "ready": True, "problems": [], "approval": "each proposal"}
+        problems: list[str] = []
+        if not b["key_configured"]:
+            problems.append("COMFY_API_KEY is not configured")
+        if versions.get("comfyui") == "unknown":
+            problems.append(f"ComfyUI isn't reachable at {settings.comfyui_url}")
+        if (b["budget_credits"] is not None and b["budget_credits"] <= 0) or (b["max_attempts"] is not None and b["max_attempts"] <= 0):
+            problems.append("the video credit or attempt limit is set to 0")
+        elif b["budget_credits"] is not None and b["remaining_credits"] is not None and b["remaining_credits"] <= 0:
+            problems.append("the overall video credit limit is used up")
+        elif b["max_attempts"] is not None and b["attempts"] >= b["max_attempts"]:
+            problems.append("the overall video attempt limit is used up")
+        return {"mode": "paid", "ready": not problems, "problems": problems, "approval": "each proposal"}
+
     # -- status -----------------------------------------------------------------------------
     @app.get("/api/status")
     def status() -> dict:
         b = service.budget().as_dict()
+        versions = adapter.versions()
         return {"adapter": adapter.name, "is_paid": adapter.is_paid, "budget": b,
+                "generation": generation_state(b, versions),
                 "workspace": {"path": str(settings.data_dir), "kind": settings.workspace_kind,
                               "source": settings.workspace_source, "db": str(settings.db_path),
                               "media": str(settings.media_dir), "marker_kind": marker.get("kind"),
                               "projects": len(ops.list_projects())},
-                "versions": adapter.versions(), "feedback_reasons": FEEDBACK_REASONS,
+                "versions": versions, "feedback_reasons": FEEDBACK_REASONS,
                 "comfyui_port": urlsplit(settings.comfyui_url).port}
 
     @app.get("/api/balance")
@@ -384,13 +420,44 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     @app.get("/api/agent/config")
     def agent_config() -> dict:
         prov = settings.agent_provider
-        return {"provider": prov, "model": agent.default_model(prov), "live": prov in ("gemini", "anthropic"),
-                "budget_usd": settings.agent_budget_usd, "spent_usd": agent.store.live_spend_usd(),
-                "max_live_requests": settings.agent_max_live_requests, "live_requests": agent.store.live_requests(),
-                "thinking": settings.agent_thinking,
-                "max_turns": settings.agent_max_turns, "max_output_tokens": settings.agent_max_output_tokens,
-                "credentials": {"gemini": bool(settings.gemini_api_key or settings.gemini_vertex_project),
-                                "anthropic": bool(settings.anthropic_api_key)}}
+        live = prov in ("gemini", "anthropic")
+        creds = {"gemini": bool(settings.gemini_api_key or settings.gemini_vertex_project),
+                 "anthropic": bool(settings.anthropic_api_key)}
+        per_conv, usd_cap = limits.director_per_conversation(), limits.director_usd_cap()
+        spent = agent.store.live_spend_usd()
+        model = agent.default_model(prov)
+        problem = None
+        if live:
+            if not creds.get(prov):
+                problem = f"No {prov} API key is configured"
+            elif per_conv is not None and per_conv <= 0:
+                problem = "Live calls are locked: requests per conversation is 0"
+            elif usd_cap is not None and usd_cap <= 0:
+                problem = "Live calls are locked: the director's dollar limit is 0"
+            elif usd_cap is not None and spent >= usd_cap:
+                problem = "The director's dollar limit is used up"
+            else:
+                try:
+                    from .agent import pricing
+                    pricing.price_for(model)
+                except Exception as e:                      # noqa: BLE001
+                    problem = str(e)
+        return {"provider": prov, "model": model, "live": live, "ready": live and problem is None, "problem": problem,
+                "budget_usd": usd_cap, "spent_usd": spent,
+                "max_live_requests": per_conv, "live_requests": agent.store.live_requests(),
+                "thinking": settings.agent_thinking, "max_turns": limits.director_per_message(),
+                "max_output_tokens": settings.agent_max_output_tokens,
+                "limits": {k: v for k, v in limits.describe().items() if k.startswith("director")},
+                "credentials": creds}
+
+    # -- limits (human-only: no agent tool reaches these) -------------------------------------
+    @app.get("/api/limits")
+    def get_limits() -> dict:
+        return limits.describe()
+
+    @app.put("/api/limits")
+    def put_limits(body: LimitsIn) -> dict:
+        return limits.set(body.limits, "user")
 
     @app.get("/api/agent/accounting")
     def accounting() -> dict:
@@ -416,8 +483,13 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     @app.post("/api/agent/threads/{tid}/messages")
     async def send_message(tid: str, body: AgentMessageIn) -> dict:
         import asyncio
-        report = await asyncio.to_thread(agent.send, tid, body.text, body.focus_shot_id)
+        report = await asyncio.to_thread(agent.send, tid, body.text, body.focus_shot_id, body.client_id)
         return {**agent.view(tid), "report": report.__dict__}
+
+    @app.post("/api/agent/threads/{tid}/cancel")
+    def cancel_message(tid: str) -> dict:
+        """Stop the message in flight before its next model request. Never starts anything."""
+        return {"cancelling": agent.request_cancel(tid)}
 
     # -- scenes and assets ------------------------------------------------------------------
     @app.post("/api/projects/{pid}/scenes", status_code=201)
@@ -569,9 +641,8 @@ def run() -> None:
     s = Settings.from_env()
     if s.workspace_source != "default":
         log.warning("ISOLATED workspace (STUDIO_DATA_DIR override): %s. Your canonical workspace is not open.", s.data_dir)
-    log.info("adapter=%s workspace=%s (%s) key_configured=%s budget=%s credits / %s attempts", s.adapter, s.data_dir,
-             s.workspace_kind,
-             bool(s.comfy_api_key), s.budget_credits, s.max_paid_attempts)
+    log.info("adapter=%s workspace=%s (%s) key_configured=%s agent=%s", s.adapter, s.data_dir, s.workspace_kind,
+             bool(s.comfy_api_key), s.agent_provider)
     uvicorn.run(create_app(s), host="127.0.0.1", port=int(__import__("os").environ.get("STUDIO_PORT", "8700")))
 
 

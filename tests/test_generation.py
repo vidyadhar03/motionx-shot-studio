@@ -264,11 +264,18 @@ def test_partner_key_never_reaches_database_or_snapshot(tmp_path):
     assert secret not in repr(w.settings)
 
 
-def test_paid_video_is_disabled_by_default(tmp_path):
+def test_paid_video_has_no_hidden_cap_but_an_explicit_zero_locks_it(tmp_path):
     from studio.config import Settings
     s = Settings.from_env({"STUDIO_DATA_DIR": str(tmp_path)})
-    assert s.adapter == "fake" and s.budget_credits == 0 and s.max_paid_attempts == 0
-    assert s.agent_provider == "scripted" and s.agent_budget_usd == 0 and s.agent_max_live_requests == 0
+    assert s.adapter == "fake" and s.budget_credits is None and s.max_paid_attempts is None
+    assert s.agent_provider == "scripted" and s.agent_budget_usd is None and s.agent_max_live_requests == 60
+    assert Settings.from_env({"STUDIO_DATA_DIR": str(tmp_path), "GEMINI_API_KEY": "k"}).agent_provider == "gemini"
+    assert Settings.from_env({"STUDIO_DATA_DIR": str(tmp_path), "GEMINI_API_KEY": "k",
+                              "STUDIO_AGENT_PROVIDER": "scripted"}).agent_provider == "scripted"      # explicit choice wins
+    # nothing configured: a person's approval is the only gate (and the key must exist)
+    open_w = World(tmp_path / "open", paid=True, COMFY_API_KEY="comfyui-test", STUDIO_BUDGET_CREDITS="", STUDIO_MAX_PAID_ATTEMPTS="")
+    take, created = open_w.service.approve(open_w.service.create_proposal(open_w.shot()["id"])["id"])
+    assert created and take["state"] == "queued"
     w = World(tmp_path / "w", paid=True, COMFY_API_KEY="comfyui-test", STUDIO_BUDGET_CREDITS=0, STUDIO_MAX_PAID_ATTEMPTS=0)
-    with pytest.raises(BudgetError, match="paid generation is disabled"):
+    with pytest.raises(BudgetError, match="locked"):
         w.service.approve(w.service.create_proposal(w.shot()["id"])["id"])

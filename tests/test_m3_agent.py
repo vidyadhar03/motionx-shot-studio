@@ -275,12 +275,12 @@ def gemini_script(sid):
     ]
 
 
-def test_live_provider_blocked_when_llm_budget_is_zero(world: World):
+def test_live_provider_blocked_when_the_dollar_limit_is_explicitly_zero(world: World):
     shot = world.shot()
     mock = MockGeminiClient([])
-    ag = runner(world, factory=lambda p, m: GeminiProvider(model=m, client=mock), agent_provider="gemini")
+    ag = runner(world, factory=lambda p, m: GeminiProvider(model=m, client=mock), agent_provider="gemini", agent_budget_usd=0.0)
     tid = ag.create_thread(shot["project_id"])["id"]
-    with pytest.raises(AgentBudgetError, match="STUDIO_AGENT_BUDGET_USD is 0"):
+    with pytest.raises(AgentBudgetError, match="dollar limit is set to 0"):
         ag.send(tid, "hi")
     assert mock.calls == [] and AgentStore(world.db).messages(tid) == []
 
@@ -445,16 +445,20 @@ def test_interactions_compat_errors_become_notices_not_500(world: World):
     assert any("bad schema" in m["content"]["text"] for m in ag.view(tid)["messages"] if m["kind"] == "notice")
 
 
-def test_live_request_cap_is_global_and_stops_mid_thread(world: World):
+def test_request_cap_is_per_conversation_and_a_new_conversation_starts_fresh(world: World):
     shot = world.shot()
     mock = MockGeminiClient(gemini_script(shot["id"]))
     ag = runner(world, factory=lambda p, m: GeminiProvider(model=m, client=mock), agent_provider="gemini",
-                agent_budget_usd=1.0, agent_max_live_requests=2)
+                agent_max_live_requests=2)                                   # no dollar limit is configured at all
     tid = ag.create_thread(shot["project_id"])["id"]
     rep = ag.send(tid, f"revise {shot['id']}")
     assert rep.stop == "budget" and len(mock.calls) == 2
-    with pytest.raises(AgentBudgetError, match="request cap"):
+    with pytest.raises(AgentBudgetError, match="start a new conversation"):
         ag.send(tid, "again")
+    mock2 = MockGeminiClient(gemini_script(shot["id"]))
+    ag2 = runner(world, factory=lambda p, m: GeminiProvider(model=m, client=mock2), agent_provider="gemini", agent_max_live_requests=2)
+    fresh = ag2.create_thread(shot["project_id"])["id"]
+    assert ag2.send(fresh, "hello").stop in ("budget", "end", "tool_use") and len(mock2.calls) == 2      # not a lifetime allowance
 
 
 def test_cost_above_estimate_stops_and_leaves_history_well_formed(world: World):

@@ -27,3 +27,13 @@ Every control of the previous sidebar-and-columns interface still exists. Nothin
 | Take card: input snapshot, timeline, job id, cost, time | Shots → inspector → Details |
 | Agent panel: New thread, thread select, Send, Use suggestion, focus, LLM spend line, accounting | Header → Ask director (New conversation, conversation picker, Send, Use suggestion, context line, usage); Settings → Director cost accounting |
 | Agent “Review in shot →” | Proposal card in the conversation: Open shot / Open asset, with the current status |
+
+## Chat-first refinement
+
+| Before | Now |
+|---|---|
+| Inspector tabs Direction / Proposal / Details always shown | Director chat is the default beside the video. **Edit direction** and **Details** (beside the shot title) temporarily replace the chat, with **← Back to chat**. Inside, a small switcher offers Direction / Proposal / Details. |
+| Direction as one long form | Expandable **Story · Camera & Look · Inputs · Output** sections (only Story open at first, each collapsed section shows a one-line summary) |
+| Prepare proposal / Review & generate | Beside the player (unchanged); a pending proposal also appears as a card at the bottom of the chat |
+| Director header with provider, model, usage, accounting | Header is just “Director”, the shot or project, and a **⋯ conversation menu** (new, switch, quiet usage) |
+| Settings read-only caps | Settings → Director / Generation hold **editable optional limits** (empty = none) beside read-only status |

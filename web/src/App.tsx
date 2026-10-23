@@ -5,17 +5,11 @@ import { DialogProvider, useDialogs } from "./dialogs";
 import ExportDialog from "./ExportDialog";
 import { GuardProvider } from "./guard";
 import Header from "./Header";
-import { LayoutCtx } from "./layout";
+import { LayoutCtx, useMedia } from "./layout";
 import OverviewView from "./OverviewView";
 import SettingsDialog from "./SettingsDialog";
 import ShotsView from "./ShotsView";
 import { StudioProvider, useStudio } from "./store";
-
-function useMedia(q: string) {
-  const [m, setM] = useState(() => matchMedia(q).matches);
-  useEffect(() => { const mq = matchMedia(q); const h = () => setM(mq.matches); mq.addEventListener("change", h); return () => mq.removeEventListener("change", h); }, [q]);
-  return m;
-}
 
 export default function App() {
   return (
@@ -34,6 +28,8 @@ function Shell() {
   const wide = useMedia("(min-width: 1180px)");
   const [sideEl, setSideEl] = useState<HTMLDivElement | null>(null);
   const [want, setWant] = useState(false);
+  const [replace, setReplace] = useState(false);
+  const [hide, setHide] = useState(false);
   const [ctxOpen, setCtxOpen] = useState(false);
   const [settings, setSettings] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -43,10 +39,12 @@ function Shell() {
     return () => { document.removeEventListener("open-settings", s); document.removeEventListener("open-export", x); };
   }, []);
   const narrow = !wide;
-  const layout = useMemo(() => ({ sideEl, setWant, narrow, ctxOpen, setCtxOpen }), [sideEl, narrow, ctxOpen]);
-  // Narrow screens: the side slot is a drawer, shown only when asked for. Wide screens: docked beside the work.
-  const showCtx = want && (wide || ctxOpen);
-  const showSide = S.directorOpen || showCtx;
+  const layout = useMemo(() => ({ sideEl, setWant, setReplace, setHide, narrow, ctxOpen, setCtxOpen }), [sideEl, narrow, ctxOpen]);
+  // The slot shows the director chat, or (when a section asks to replace it, e.g. manual shot controls) that section's
+  // panel. Narrow screens: a drawer, only when asked for. Wide screens: docked beside the work. Never a third column.
+  const ctxShown = want && !hide && (replace || !S.directorOpen) && (wide || ctxOpen);
+  const dirShown = S.directorOpen && !hide && !(ctxShown && replace);
+  const showSide = dirShown || ctxShown;
   const docked = wide && showSide;
 
   return (
@@ -66,8 +64,8 @@ function Shell() {
         </main>
         {narrow && showSide && <div className="side-scrim" onClick={() => { S.setDirectorOpen(false); setCtxOpen(false); }} />}
         <aside className={`side ${showSide ? "open" : ""} ${narrow ? "drawer" : ""}`} aria-label="Side panel" hidden={!showSide}>
-          <div ref={setSideEl} className="side-ctx" hidden={S.directorOpen || !showCtx} />
-          {S.project && <div className="side-dir" hidden={!S.directorOpen}>
+          <div ref={setSideEl} className="side-ctx" hidden={!ctxShown} />
+          {S.project && <div className="side-dir" hidden={!dirShown}>
             <Director onClose={() => S.setDirectorOpen(false)} />
           </div>}
         </aside>

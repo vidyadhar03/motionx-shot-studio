@@ -124,8 +124,16 @@ class AgentStore:
                       "VALUES (?,?,?,?,?,?,?,?)", (bid, provider, period, amount_usd, source.strip(), note, by, now()))
         return self.db.one("SELECT * FROM agent_billing WHERE id=?", bid)
 
-    def live_requests(self) -> int:
-        return self.db.one("SELECT COUNT(*) AS n FROM agent_usage WHERE live=1")["n"]
+    def live_requests(self, thread_id: str | None = None) -> int:
+        """Live model requests ever made (all conversations), or in one conversation."""
+        if thread_id is None:
+            return self.db.one("SELECT COUNT(*) AS n FROM agent_usage WHERE live=1")["n"]
+        return self.db.one("SELECT COUNT(*) AS n FROM agent_usage WHERE live=1 AND thread_id=?", thread_id)["n"]
+
+    def has_client_id(self, tid: str, client_id: str) -> bool:
+        """True if this conversation already holds a user message sent with this client id (a repeated click/retry)."""
+        return bool(self.db.one("SELECT 1 AS x FROM agent_messages WHERE thread_id=? AND kind='user' "
+                                "AND json_extract(content,'$.client_id')=?", tid, client_id))
 
     def usage(self, tid: str) -> list[dict]:
         return self.db.all("SELECT * FROM agent_usage WHERE thread_id=? ORDER BY id", tid)

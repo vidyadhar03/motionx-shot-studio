@@ -201,7 +201,7 @@ def test_paid_image_generation_is_capped_separately(tmp_path):
     pid, pl, ag = _setup(w)
     pl.approve(pl.write_plan(pid, PLAN, expected_revision=None)["id"], 1)
     g = ag.create_proposal(pid, "vendor", prompt="vendor")
-    with pytest.raises(BudgetError, match="disabled"):
+    with pytest.raises(BudgetError, match="locked"):
         ag.approve(g["id"])
     assert ag.get(g["id"])["status"] == "pending"
     w2 = World(tmp_path / "b", paid=True, STUDIO_IMAGE_BUDGET_CREDITS="6", STUDIO_IMAGE_MAX_PAID_ATTEMPTS="1")

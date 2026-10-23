@@ -51,8 +51,9 @@ export type Workspace = { path: string; kind: "canonical" | "isolated"; source: 
 export type Status = {
   adapter: string; is_paid: boolean; versions: Record<string, string>; feedback_reasons: string[]; comfyui_port: number | null;
   workspace: Workspace;
-  budget: { budget_credits: number; committed_credits: number; remaining_credits: number; attempts: number;
-            max_attempts: number; key_configured: boolean; is_paid: boolean };
+  budget: { budget_credits: number | null; committed_credits: number; remaining_credits: number | null; attempts: number;
+            max_attempts: number | null; key_configured: boolean; is_paid: boolean };
+  generation: { mode: "fake" | "paid"; ready: boolean; problems: string[]; approval: string };
 };
 
 export type Presets = { presets: Record<string, string[]>; labels: Record<string, Record<string, string>>;
@@ -61,9 +62,12 @@ export type Presets = { presets: Record<string, string[]>; labels: Record<string
 
 export type Decision = { id: string; text: string; decided_by: string; at: string };
 export type Revision = { revision: number; author: string; at: string; diff: Record<string, { from: unknown; to: unknown }> };
-export type AgentConfig = { provider: string; model: string; live: boolean; budget_usd: number; spent_usd: number;
-                            max_live_requests: number; live_requests: number; thinking?: string;
-                            max_turns: number; max_output_tokens: number; credentials: Record<string, boolean> };
+export type LimitInfo = { value: number | null; source: "environment" | "setting" | "default"; env: string; kind: string; editable: boolean };
+export type Limits = Record<string, LimitInfo>;
+export type AgentConfig = { provider: string; model: string; live: boolean; ready: boolean; problem: string | null;
+                            budget_usd: number | null; spent_usd: number; max_live_requests: number | null; live_requests: number;
+                            thinking?: string; max_turns: number; max_output_tokens: number; limits: Limits;
+                            credentials: Record<string, boolean> };
 export type AgentThread = { id: string; project_id: string; provider: string; model: string; title: string; created_at: string };
 export type AgentMessage = { id: number; kind: "user" | "assistant_text" | "notice"; at: string;
                              content: { text: string; focus_shot_id?: string; level?: string; stop?: string } };
@@ -122,7 +126,7 @@ export type Requirement = { handle: string; kind: string; name: string; descript
   generations: { id: string; status: string; created_by: string; est_credits: number; asset_version_id: string | null }[];
   shots: { key: string; shot_id: string; title: string; pinned_version: number | null }[] };
 export type Preparation = { requirements: Requirement[]; ready: number; missing_required: string[];
-  image_budget: { is_paid: boolean; budget_credits: number; max_attempts: number; attempts: number; committed_credits: number } };
+  image_budget: { is_paid: boolean; budget_credits: number | null; max_attempts: number | null; attempts: number; committed_credits: number } };
 export type ImageWorkflow = { id: string; title: string; size_presets: string[]; max_references: number;
   est_credits_per_image: number; adapter: string; is_paid: boolean; pricing: { basis: string } };
 
@@ -174,8 +178,11 @@ export const api = {
   threads: (pid: string) => call<AgentThread[]>("GET", `/api/projects/${pid}/agent/threads`),
   createThread: (pid: string) => call<AgentThread>("POST", `/api/projects/${pid}/agent/threads`, {}),
   thread: (tid: string) => call<ThreadView>("GET", `/api/agent/threads/${tid}`),
-  sendAgent: (tid: string, text: string, focus_shot_id: string | null) =>
-    call<ThreadView>("POST", `/api/agent/threads/${tid}/messages`, { text, focus_shot_id }),
+  sendAgent: (tid: string, text: string, focus_shot_id: string | null, client_id: string) =>
+    call<ThreadView & { report: { stop: string } }>("POST", `/api/agent/threads/${tid}/messages`, { text, focus_shot_id, client_id }),
+  cancelAgent: (tid: string) => call<{ cancelling: boolean }>("POST", `/api/agent/threads/${tid}/cancel`),
+  limits: () => call<Limits>("GET", "/api/limits"),
+  putLimits: (limits: Record<string, number | null>) => call<Limits>("PUT", "/api/limits", { limits }),
   exportPreview: (pid: string) => call<ExportPreview>("GET", `/api/projects/${pid}/export/preview`),
   exportUrl: (pid: string) => `/api/projects/${pid}/export.zip`,
   cancelTake: (tid: string) => call<CancelResult>("POST", `/api/takes/${tid}/cancel`),

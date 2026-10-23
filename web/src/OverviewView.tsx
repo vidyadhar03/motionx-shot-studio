@@ -131,8 +131,8 @@ function StartFilm() {
   const [idea, setIdea] = useState(p.brief);
   const [busy, setBusy] = useState(false);
   const cap = agentCap(S.agentCfg);
-  const note = cap.state === "free" ? "Live director calls are off: new conversations use the offline stand-in (simple rules, not an AI model), which can't write a real plan. Drafting needs a live model, set up in Settings."
-    : cap.state === "locked" ? `Live director calls are locked (${cap.summary}). ${cap.detail}` : cap.state === "available" ? "Pressing Send in the director makes live model calls. You'll see the request first." : "";
+  const note = cap.state === "free" ? "Live director calls are off: new conversations use the offline stand-in (simple rules, not an AI model), which can't write a real plan. Drafting needs a live model."
+    : cap.state === "problem" ? `The director needs attention: ${cap.detail}` : cap.state === "ready" ? "Pressing Send in the director makes live model calls. You'll see the request first." : "";
   const draft = async () => {
     setBusy(true);
     try {

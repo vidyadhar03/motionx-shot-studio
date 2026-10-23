@@ -7,11 +7,13 @@ re-run (the model is told to re-read). Reloading a thread only reads rows; it ex
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Callable
 
 from ..config import Settings
 from ..generation import GenerationService
+from ..limits import Limits
 from ..media import MediaStore
 from ..ops import Ops
 from . import pricing
@@ -20,6 +22,10 @@ from .store import AgentStore
 from .tools import SPECS, AgentTools, outcome_from_record, outcome_record
 
 log = logging.getLogger("studio.agent")
+
+
+class AgentBusyError(RuntimeError):
+    """A message is already being worked on in this conversation."""
 
 
 class AgentBudgetError(RuntimeError):
@@ -66,6 +72,9 @@ class AgentRunner:
     def __init__(self, settings: Settings, ops: Ops, service: GenerationService, media: MediaStore,
                  store: AgentStore, provider_factory: Callable[[str, str], Provider] | None = None):
         self.settings, self.ops, self.service, self.media, self.store = settings, ops, service, media, store
+        self.limits = Limits(store.db, settings)
+        self._active: dict[str, threading.Event] = {}       # conversations with a message in flight -> cancel flag
+        self._active_lock = threading.Lock()
         self._factory = provider_factory or (lambda p, m: make_provider(settings, p, m))
 
     def default_model(self, provider: str) -> str:
@@ -88,23 +97,57 @@ class AgentRunner:
                 f"Focus shot: {focus_shot_id or 'none'}")
 
     # -- one user message ---------------------------------------------------------------------
-    def send(self, thread_id: str, text: str, focus_shot_id: str | None = None) -> TurnReport:
+    def request_cancel(self, thread_id: str) -> bool:
+        """Ask the message in flight (if any) to stop before its NEXT model request. A request already sent can't be
+        recalled; tool results already applied stay applied (and recorded)."""
+        with self._active_lock:
+            ev = self._active.get(thread_id)
+        if ev:
+            ev.set()
+        return ev is not None
+
+    def is_busy(self, thread_id: str) -> bool:
+        with self._active_lock:
+            return thread_id in self._active
+
+    def send(self, thread_id: str, text: str, focus_shot_id: str | None = None, client_id: str | None = None) -> TurnReport:
+        """One person-initiated message. One at a time per conversation; a repeated client id is not re-run."""
+        if client_id and self.store.has_client_id(thread_id, client_id):
+            return TurnReport(0, "duplicate", self.store.live_spend_usd())
+        cancel = threading.Event()
+        with self._active_lock:
+            if thread_id in self._active:
+                raise AgentBusyError("this conversation is already working on a message; wait for it or stop it")
+            self._active[thread_id] = cancel
+        try:
+            return self._send(thread_id, text, focus_shot_id, client_id, cancel)
+        finally:
+            with self._active_lock:
+                self._active.pop(thread_id, None)
+
+    def _send(self, thread_id: str, text: str, focus_shot_id: str | None, client_id: str | None,
+              cancel: threading.Event) -> TurnReport:
         thread = self.store.thread(thread_id)
         provider = self._factory(thread["provider"], thread["model"])
         if provider.live:
-            self._check_live_allowed(provider)          # before ANY network call, incl. verification
+            self._check_live_allowed(provider, thread_id)          # before ANY network call, incl. verification
             provider.verify()
         tools = AgentTools(thread["project_id"], self.ops, self.service, self.media)
         system = self.system_prompt(thread["project_id"], focus_shot_id)
-        self.store.append(thread_id, "user", {"text": text, "focus_shot_id": focus_shot_id})
+        self.store.append(thread_id, "user", {"text": text, "focus_shot_id": focus_shot_id,
+                                              **({"client_id": client_id} if client_id else {})})
         self.store.append_items(thread_id, provider.user_items(text))
         history = self.store.provider_items(thread_id)
         stop = "end"
-        for turn in range(1, self.settings.agent_max_turns + 1):
+        max_turns = self.limits.director_per_message()
+        for turn in range(1, max_turns + 1):
+            if cancel.is_set():
+                self.store.append(thread_id, "notice", {"level": "warn", "text": "stopped at your request"})
+                return TurnReport(turn - 1, "cancelled", self.store.live_spend_usd())
             pre = None
             if provider.live:
                 try:
-                    pre = self._check_budget(provider, system, history)
+                    pre = self._check_budget(provider, system, history, thread_id)
                 except AgentBudgetError as e:          # mid-thread: stop cleanly and say why
                     if turn == 1:
                         raise
@@ -150,8 +193,8 @@ class AgentRunner:
             self.store.append_items(thread_id, items)
             history += items
         self.store.append(thread_id, "notice", {"level": "warn",
-                                                "text": f"stopped at the turn limit ({self.settings.agent_max_turns})"})
-        return TurnReport(self.settings.agent_max_turns, "turn_limit", self.store.live_spend_usd())
+                                                "text": f"stopped at the limit of {max_turns} model requests per message"})
+        return TurnReport(max_turns, "turn_limit", self.store.live_spend_usd())
 
     def _execute(self, thread_id: str, tools: AgentTools, call: ToolCall) -> ToolOutcome:
         if not self.store.start_call(thread_id, call.id, call.name, call.input):
@@ -167,30 +210,37 @@ class AgentRunner:
         return outcome
 
     # -- live gates -----------------------------------------------------------------------------
-    def _check_live_allowed(self, provider: Provider) -> None:
-        if self.settings.agent_max_live_requests <= 0:
-            raise AgentBudgetError("live calls are disabled: STUDIO_AGENT_MAX_LIVE_REQUESTS is 0")
-        if self.settings.agent_budget_usd <= 0:
-            raise AgentBudgetError(f"live {provider.name} calls are disabled: STUDIO_AGENT_BUDGET_USD is 0 "
-                                   "(the LLM spend cap is separate from Comfy credits)")
+    def _check_live_allowed(self, provider: Provider, thread_id: str | None = None) -> None:
+        per_conv, usd_cap = self.limits.director_per_conversation(), self.limits.director_usd_cap()
+        if per_conv is not None and per_conv <= 0:
+            raise AgentBudgetError("live calls are locked: requests per conversation is set to 0 "
+                                   "(Settings, or STUDIO_AGENT_MAX_LIVE_REQUESTS)")
+        if usd_cap is not None and usd_cap <= 0:
+            raise AgentBudgetError(f"live {provider.name} calls are locked: the director's dollar limit is set to 0 "
+                                   "(Settings, or STUDIO_AGENT_BUDGET_USD is 0; this is separate from Comfy credits)")
         try:
             pricing.price_for(provider.model)
         except pricing.UnknownPrice as e:
             raise AgentBudgetError(str(e)) from None
 
-    def _check_budget(self, provider: Provider, system: str, history: list[dict]) -> float:
+    def _check_budget(self, provider: Provider, system: str, history: list[dict], thread_id: str) -> float:
         """Pre-call ESTIMATE, not a guaranteed bound: input is approximated from characters (+ a per-image
         allowance) and thinking is assumed to stay within agent_thought_allowance, which the provider does not
-        guarantee. Returns the estimate; raises if spent + estimate would exceed the cap or the request cap."""
-        if self.store.live_requests() >= self.settings.agent_max_live_requests:
-            raise AgentBudgetError(f"live request cap reached ({self.settings.agent_max_live_requests})")
+        guarantee. Returns the estimate; raises if this conversation is out of requests or an (optional) dollar
+        limit would be exceeded."""
+        per_conv = self.limits.director_per_conversation()
+        if per_conv is not None and self.store.live_requests(thread_id) >= per_conv:
+            raise AgentBudgetError(f"this conversation has used its {per_conv} model requests; start a new conversation "
+                                   "to continue (or raise the limit in Settings)")
         est_in = provider.estimate_input_tokens(system, history, SPECS)
         est = pricing.usd(provider.model, est_in,
                           self.settings.agent_max_output_tokens + self.settings.agent_thought_allowance)
-        spent = self.store.live_spend_usd()
-        if spent + est > self.settings.agent_budget_usd:
-            raise AgentBudgetError(f"next {provider.name} request is estimated at ${est:.4f}; ${spent:.4f} of the "
-                                   f"${self.settings.agent_budget_usd:.2f} LLM cap is already used")
+        usd_cap = self.limits.director_usd_cap()
+        if usd_cap is not None:
+            spent = self.store.live_spend_usd()
+            if spent + est > usd_cap:
+                raise AgentBudgetError(f"next {provider.name} request is estimated at ${est:.4f}; ${spent:.4f} of the "
+                                       f"${usd_cap:.2f} dollar limit is already used")
         return est
 
     # -- reading a thread (never executes anything) --------------------------------------------

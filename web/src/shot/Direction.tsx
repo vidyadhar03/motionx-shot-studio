@@ -6,6 +6,18 @@ import { useShotDraft } from "./useShotDraft";
 export type RevisionContext = { parentTakeId: string; parentNumber: number; note: string };
 type DraftApi = ReturnType<typeof useShotDraft>;
 
+const openState = new Map<string, boolean>([["Story", true]]);       // which sections the person left open (survives remounts)
+
+function Section({ title, summary, children }: { title: string; summary: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(openState.get(title) ?? false);
+  return (
+    <details className="dsec" open={open} onToggle={(e) => { const o = (e.target as HTMLDetailsElement).open; openState.set(title, o); setOpen(o); }}>
+      <summary><span className="dsec-title">{title}</span><span className="dsec-sum">{open ? "" : summary}</span></summary>
+      <div className="dsec-body">{children}</div>
+    </details>
+  );
+}
+
 const CONTROLS = [
   ["framing", "Framing"], ["camera_move", "Camera move"], ["lens_look", "Lens look"], ["lighting", "Lighting"],
   ["depth_of_field", "Depth of field"],
@@ -58,8 +70,7 @@ export default function Direction({ shot, d, presets, assets, scenes, revision, 
           The new take links back to take {revision.parentNumber}; earlier takes stay as they are. <button className="small ghost" onClick={onClearRevision}>Cancel revision</button></div>
       )}
 
-      <fieldset>
-        <legend>Story</legend>
+      <Section title="Story" summary={String(draft.title ?? "")}>
         <label>Title<input value={(draft.title as string) ?? ""} onChange={(e) => set("title", e.target.value)} /></label>
         <label><span className="lbl">Intention <span className="muted">what the shot is for</span></span>
           <textarea rows={2} value={(draft.intention as string) ?? ""} onChange={(e) => set("intention", e.target.value)} /></label>
@@ -69,10 +80,9 @@ export default function Direction({ shot, d, presets, assets, scenes, revision, 
           <select value={(draft.scene_id as string) ?? ""} onChange={(e) => set("scene_id", e.target.value)}>
             <option value="">No scene</option>{scenes.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select></label>
-      </fieldset>
+      </Section>
 
-      <fieldset>
-        <legend>Camera &amp; look</legend>
+      <Section title="Camera & Look" summary={[draft.framing, draft.camera_move, draft.lighting].filter(Boolean).map((x) => String(x).replace(/_/g, " ")).join(" · ") || "no look chosen"}>
         <div className="grid2">
           {CONTROLS.map(([k, label]) => (
             <label key={k}>{label}
@@ -98,10 +108,9 @@ export default function Direction({ shot, d, presets, assets, scenes, revision, 
           <p>Framing, camera, lens, depth of field and lighting become prompt descriptors. They are not calibrated camera, lens or lighting controls.
             Truck = the camera slides sideways (parallax); pan = it turns in place; tracking = it follows a moving subject.
             Timed beats go in Action (“0–2s: …”) and must fit the duration.</p></details>
-      </fieldset>
+      </Section>
 
-      <fieldset>
-        <legend>Inputs</legend>
+      <Section title="Inputs" summary={mode === "first_frame" ? (frame ? "start frame" : "no start frame") : `${refs.length} reference${refs.length === 1 ? "" : "s"}`}>
         <div className="segmented" role="group" aria-label="Generation mode">
           <button className={mode === "first_frame" ? "on" : ""} aria-pressed={mode === "first_frame"} onClick={() => set("mode", "first_frame")}>Start frame → video</button>
           <button className={mode === "reference" ? "on" : ""} aria-pressed={mode === "reference"} onClick={() => set("mode", "reference")}>References → video</button>
@@ -147,10 +156,9 @@ export default function Direction({ shot, d, presets, assets, scenes, revision, 
             {!assets.length && <p className="muted">Add assets in the Assets section first.</p>}
           </div>
         )}
-      </fieldset>
+      </Section>
 
-      <fieldset>
-        <legend>Output</legend>
+      <Section title="Output" summary={`${draft.duration_s}s · ${draft.resolution}${mode === "reference" ? ` · ${draft.aspect_ratio}` : ""}`}>
         <div className="grid2">
           <label>Duration
             <select value={draft.duration_s as number} onChange={(e) => set("duration_s", Number(e.target.value))}>
@@ -165,7 +173,7 @@ export default function Direction({ shot, d, presets, assets, scenes, revision, 
                             onChange={(e) => set("seed", e.target.value === "" ? null : Number(e.target.value))} /></label>
         </div>
         <label>Sound<input value={(draft.audio as string) ?? ""} placeholder="e.g. rain on cobbles, distant traffic, no music" onChange={(e) => set("audio", e.target.value)} /></label>
-      </fieldset>
+      </Section>
 
       {shot.direction_warnings?.length > 0 && (
         <div className="note warn"><strong>Direction notes{d.dirty ? " (saved version)" : ""}:</strong> accepted, but worth a second look.

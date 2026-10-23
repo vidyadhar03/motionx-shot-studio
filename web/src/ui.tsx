@@ -14,7 +14,7 @@ export function SaveState({ status }: { status: SaveStatus }) {
 }
 
 /** Small action menu (button + popup). Esc and outside click close it; arrow keys move between items. */
-export function Menu({ label, children, align = "right" }: { label: ReactNode; children: (close: () => void) => ReactNode; align?: "left" | "right" }) {
+export function Menu({ label, children, align = "right", ...rest }: { label: ReactNode; children: (close: () => void) => ReactNode; align?: "left" | "right"; "aria-label"?: string }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const id = useId();
@@ -35,7 +35,7 @@ export function Menu({ label, children, align = "right" }: { label: ReactNode; c
   };
   return (
     <div className="menu" ref={root} onKeyDown={key}>
-      <button className="ghost" aria-haspopup="menu" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>{label}</button>
+      <button className="ghost" aria-haspopup="menu" aria-expanded={open} aria-controls={id} aria-label={rest["aria-label"]} onClick={() => setOpen(!open)}>{label}</button>
       {open && <div className={`menu-pop ${align}`} role="menu" id={id}>{children(() => setOpen(false))}</div>}
     </div>
   );

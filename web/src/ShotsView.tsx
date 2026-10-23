@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, Shot, Take } from "./api";
+import { api, media, Shot, Take } from "./api";
 import { ACTIVE_STATES, approveBlock, cardTake, defaultTake, orderedShots, playable, shotStatus, takeKind } from "./derive";
 import { useDialogs } from "./dialogs";
 import { useGuard } from "./guard";
@@ -13,6 +13,7 @@ import TakeOps, { TAKE_LABEL } from "./shot/TakeOps";
 import { useShotDraft } from "./shot/useShotDraft";
 
 type Tab = "direction" | "proposal" | "details";
+type Panel = "chat" | Tab;
 type Msg = { kind: "ok" | "warn"; text: string } | null;
 
 export default function ShotsView() {
@@ -41,7 +42,8 @@ export default function ShotsView() {
   const d = useShotDraft(cur, (s) => { setShot(s); reload(); }, fail);
   useGuard("shot-direction", { label: `Direction edits to “${cur?.title || "this shot"}”`, dirty: d.dirty, save: async () => !!(await d.save()), discard: d.discard });
 
-  const [tab, setTab] = useState<Tab>("direction");
+  const [panel, setPanel] = useState<Panel>("chat");                     // chat is the default; manual controls replace it on demand
+  const [cmpDirector, setCmpDirector] = useState(false);
   const [pick, setPick] = useState<string | null>(null);
   const [cmp, setCmp] = useState<{ a: string; b: string } | null>(null);
   const [revision, setRevision] = useState<RevisionContext | null>(null);
@@ -51,14 +53,16 @@ export default function ShotsView() {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   useEffect(() => {                                                       // a different shot: start fresh
     setPick(null); setCmp(null); setRevision(null); setMsg(null); setFeedbackOpen(false);
-    setTab(ov?.open_proposal?.status === "pending" && !ov.selected_take_id ? "proposal" : "direction");
+    setPanel("chat"); setCmpDirector(false);
   }, [shotId]);                                                           // eslint-disable-line react-hooks/exhaustive-deps
 
   const takes = cur?.takes ?? [];
   const viewed: Take | null = takes.find((t) => t.id === pick) ?? defaultTake(takes, cur?.selected_take_id ?? null);
   const blockers = ov?.blockers ?? [];
   const noInspector = !!cmp;
-  useSide(!!cur && !noInspector);
+  useSide(!!cur && panel !== "chat", { replace: true, hide: noInspector && !cmpDirector });
+
+  const openPanel = useCallback((p: Panel) => { setPanel(p); layout.setCtxOpen(p !== "chat"); if (p === "chat") S.setDirectorOpen(true); }, [layout, S]);
 
   const prepare = useCallback(async () => {
     if (!cur) return;
@@ -66,10 +70,10 @@ export default function ShotsView() {
     try {
       if (d.dirty) { const s = await d.save(); if (!s) return; }
       await api.propose(cur.id, revision?.note ?? "", revision?.parentTakeId ?? null);
-      setRevision(null); setTab("proposal"); layout.setCtxOpen(true);
+      setRevision(null); openPanel("proposal");
       await refresh();
     } catch (e) { fail(e); } finally { setPreparing(false); }
-  }, [cur, d, revision, refresh, fail, layout]);
+  }, [cur, d, revision, refresh, fail, openPanel]);
 
   // -- take decisions: each is an existing validated operation; compound ones report partial failure honestly ------
   const m = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -139,11 +143,13 @@ export default function ShotsView() {
                         : <button className="small ghost" onClick={toggleLock} title="A locked shot can't be edited by the director">Lock from director</button>}
             <div className="spacer" />
             <SaveState status={d.status} />
-            {layout.narrow && <button className="small" onClick={() => layout.setCtxOpen(!layout.ctxOpen)} aria-expanded={layout.ctxOpen}>Inspector</button>}
+            <button className="small" onClick={() => openPanel("direction")}>Edit direction{d.dirty ? " •" : ""}</button>
+            <button className="small ghost" onClick={() => openPanel("details")}>Details</button>
           </div>
+          <ShotSummary shot={cur} presets={presets} />
 
           <Player cur={cur} viewed={viewed} open={open} blockers={blockers} onPrepare={prepare} preparing={preparing}
-                  goProposal={() => { setTab("proposal"); layout.setCtxOpen(true); }} />
+                  goProposal={() => openPanel("proposal")} />
 
           {viewed && (
             <div className="viewed-line">
@@ -169,10 +175,10 @@ export default function ShotsView() {
                      onSelect={selectOnly} onFeedback={() => setFeedbackOpen(!feedbackOpen)} feedbackOpen={feedbackOpen}
                      onCompare={() => { if (viewed && takes.filter(playable).length >= 2) { const other = (selectedTake && selectedTake.id !== viewed.id ? selectedTake : takes.filter(playable).find((t) => t.id !== viewed.id))!; setCmp({ a: other.id, b: viewed.id }); } }}
                      canCompare={takes.filter(playable).length >= 2}
-                     onReviseHere={(t) => { setRevision({ parentTakeId: t.id, parentNumber: t.number, note: t.feedback.at(-1)?.note ?? "" }); setTab("direction"); layout.setCtxOpen(true); }}
+                     onReviseHere={(t) => { setRevision({ parentTakeId: t.id, parentNumber: t.number, note: t.feedback.at(-1)?.note ?? "" }); openPanel("direction"); }}
                      onReviseDirector={(t) => { const notes = t.feedback.map((f) => `- ${f.reason}: ${f.note}`).join("\n");
                        S.askDirector(`Revise shot ${ordered.findIndex((x) => x.id === cur.id) + 1} (“${cur.title}”) from take ${t.number}.${notes ? `\nFeedback on take ${t.number}:\n${notes}` : ""}`, cur.id); }}
-                     goProposal={() => { setTab("proposal"); layout.setCtxOpen(true); }} onPrepare={prepare} />
+                     goProposal={() => openPanel("proposal")} onPrepare={prepare} />
           </div>
           {msg && <div className={`note ${msg.kind === "ok" ? "ok" : "warn"}`} role={msg.kind === "ok" ? "status" : "alert"}>{msg.text}</div>}
           {viewed && feedbackOpen && (
@@ -184,37 +190,33 @@ export default function ShotsView() {
             <TakeOps take={viewed} onChanged={refresh} onError={fail} />)}
 
           <TakeStrip takes={takes} selectedId={cur.selected_take_id} viewedId={viewed?.id ?? null} onView={(id) => setPick(id)}
-                     onNew={prepareBlock ? null : () => { setTab("direction"); layout.setCtxOpen(true); }} />
+                     onNew={prepareBlock ? null : () => openPanel("direction")} />
         </div>
       )}
       {cur && cmp && (
-        <CompareView cur={cur} cmp={cmp} setCmp={setCmp} busy={busy} onChoose={approveSelect} msg={msg} />
+        <CompareView cur={cur} cmp={cmp} setCmp={setCmp} busy={busy} onChoose={approveSelect} msg={msg} showDir={cmpDirector} onToggleDir={() => { setCmpDirector(!cmpDirector); if (!cmpDirector) S.setDirectorOpen(true); }} />
       )}
 
       <SidePortal>
-        {cur && (
+        {cur && panel !== "chat" && (
           <div className="inspector">
-            <div className="tabs" role="tablist" aria-label="Shot inspector" onKeyDown={(e) => {
-              const order: Tab[] = ["direction", "proposal", "details"]; const i = order.indexOf(tab);
-              if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-                const next = order[(i + (e.key === "ArrowRight" ? 1 : order.length - 1)) % order.length]; setTab(next); e.preventDefault();
-                setTimeout(() => document.getElementById(`tab-${next}`)?.focus(), 0);
-              }
-            }}>
-              {(["direction", "proposal", "details"] as Tab[]).map((t) => (
-                <button key={t} role="tab" id={`tab-${t}`} aria-selected={tab === t} tabIndex={tab === t ? 0 : -1} aria-controls={`panel-${t}`} className={tab === t ? "on" : ""} onClick={() => setTab(t)}>
-                  {t === "direction" ? "Direction" : t === "proposal" ? "Proposal" : "Details"}
-                  {t === "proposal" && open && <i className={`dot ${open.status}`} aria-label={open.status === "pending" ? "waiting for approval" : "out of date"} />}
-                  {t === "direction" && d.dirty && <i className="dot dirty" aria-label="unsaved changes" />}
-                </button>))}
-              {layout.narrow && <button className="icon-btn close-side" aria-label="Close inspector" onClick={() => layout.setCtxOpen(false)}>✕</button>}
+            <div className="panel-head">
+              <button className="back-chat" onClick={() => openPanel("chat")}>← Back to chat</button>
+              <div className="seg-nav" role="group" aria-label="Shot controls">
+                {(["direction", "proposal", "details"] as Tab[]).map((t) => (
+                  <button key={t} className={panel === t ? "on" : ""} aria-pressed={panel === t} onClick={() => setPanel(t)}>
+                    {t === "direction" ? "Direction" : t === "proposal" ? "Proposal" : "Details"}
+                    {t === "proposal" && open && <i className={`dot ${open.status}`} aria-label={open.status === "pending" ? "waiting for approval" : "out of date"} />}
+                    {t === "direction" && d.dirty && <i className="dot dirty" aria-label="unsaved changes" />}
+                  </button>))}
+              </div>
             </div>
-            <div className="tab-panel" role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
-              {tab === "direction" && <Direction shot={cur} d={d} presets={presets} assets={assets} scenes={project.scenes} revision={revision}
-                                                  onClearRevision={() => setRevision(null)} onPrepare={prepare} preparing={preparing} blockedReason={prepareBlock} onError={fail} />}
-              {tab === "proposal" && <ProposalTab shot={cur} status={status} blockers={blockers} dirty={d.dirty} onPrepare={prepare} preparing={preparing}
-                                                   onChanged={refresh} onApproved={async () => { setPick(null); await refresh(); S.reloadStatus(); }} onError={fail} />}
-              {tab === "details" && <Details shot={cur} take={viewed} reasons={status.feedback_reasons} onOpenTake={(id) => setPick(id)} onChanged={refresh} onError={fail} />}
+            <div className="tab-panel">
+              {panel === "direction" && <Direction shot={cur} d={d} presets={presets} assets={assets} scenes={project.scenes} revision={revision}
+                                                    onClearRevision={() => setRevision(null)} onPrepare={prepare} preparing={preparing} blockedReason={prepareBlock} onError={fail} />}
+              {panel === "proposal" && <ProposalTab shot={cur} status={status} blockers={blockers} dirty={d.dirty} onPrepare={prepare} preparing={preparing}
+                                                     onChanged={refresh} onApproved={async () => { setPick(null); await refresh(); S.reloadStatus(); }} onError={fail} />}
+              {panel === "details" && <Details shot={cur} take={viewed} reasons={status.feedback_reasons} onOpenTake={(id) => setPick(id)} onChanged={refresh} onError={fail} />}
             </div>
           </div>
         )}
@@ -258,6 +260,21 @@ function ShotStrip({ ordered, current, scenes, onOpen, onNewShot, onNewScene }: 
         <button className="small ghost" onClick={onNewScene}>＋ Scene</button>
       </div>
     </nav>
+  );
+}
+
+/** Compact summary outside the chat: framing, camera move, duration and what the shot references. Editing is on demand. */
+function ShotSummary({ shot, presets }: { shot: Shot; presets: import("./api").Presets }) {
+  const lab = (k: string, v: string | null) => (v ? presets.labels[k]?.[v] ?? v.replace(/_/g, " ") : null);
+  const refs = shot.refs_resolved ?? [];
+  return (
+    <div className="shot-summary">
+      {lab("framing", shot.framing) && <span className="chip muted">{lab("framing", shot.framing)}</span>}
+      {lab("camera_move", shot.camera_move) && <span className="chip muted">{lab("camera_move", shot.camera_move)}</span>}
+      <span className="chip muted">{shot.duration_s}s</span>
+      {shot.start_frame_sha && <img className="ss-thumb" src={media(shot.start_frame_sha)} alt="Start frame" title="Start frame" />}
+      {refs.map((r) => <img key={r.asset_version_id} className="ss-thumb" src={media(r.media_sha)} alt={`@${r.handle} v${r.version}`} title={`@${r.handle} v${r.version}`} />)}
+    </div>
   );
 }
 
@@ -310,15 +327,15 @@ function Actions({ cur, viewed, open, blockers, status, busy, selectedTake, canC
       {open.status === "pending" && pendingGate && <span className="reason">Can't approve yet: {pendingGate}</span>}
     </div>
   );
-  if (!t) return <>{proposalBar}</>;
+  if (!t) return null;                                   // an empty shot's one action lives in the player area
   const selected = cur.selected_take_id === t.id;
   const done = t.state === "succeeded";
   return (
     <>
       {done && t.review === "unreviewed" && !selected && (
-        <button className="primary" disabled={busy} onClick={() => onApproveSelect(t)}
-                title={selectedTake ? `This will replace take ${selectedTake.number} as the selected take` : undefined}>Approve &amp; select</button>)}
-      {done && t.review === "approved" && !selected && <button className="primary" disabled={busy} onClick={() => onSelect(t)}>Select for film</button>}
+        <button className="btn-review" disabled={busy} onClick={() => onApproveSelect(t)}
+                title={selectedTake ? `Reviews this existing take (no generation). It will replace take ${selectedTake.number} as the selected take.` : "Reviews this existing take. Never generates anything."}>Approve &amp; select take</button>)}
+      {done && t.review === "approved" && !selected && <button className="btn-review" disabled={busy} onClick={() => onSelect(t)}>Select for film</button>}
       {done && selected && <span className="selected-badge">✓ Selected for the film</span>}
       {done && t.review === "rejected" && <button disabled={busy} onClick={() => onUndoReview(t)}>Undo reject</button>}
       {done && t.review !== "rejected" && !selected && <button className="danger-ghost" disabled={busy} onClick={() => onReject(t)}>Reject</button>}
@@ -366,8 +383,8 @@ function TakeStrip({ takes, selectedId, viewedId, onView, onNew }: {
   );
 }
 
-function CompareView({ cur, cmp, setCmp, busy, onChoose, msg }: {
-  cur: Shot; cmp: { a: string; b: string }; setCmp: (c: { a: string; b: string } | null) => void; busy: boolean; onChoose: (t: Take) => void; msg: Msg;
+function CompareView({ cur, cmp, setCmp, busy, onChoose, msg, showDir, onToggleDir }: {
+  showDir: boolean; onToggleDir: () => void; cur: Shot; cmp: { a: string; b: string }; setCmp: (c: { a: string; b: string } | null) => void; busy: boolean; onChoose: (t: Take) => void; msg: Msg;
 }) {
   const ready = cur.takes.filter(playable).sort((a, b) => a.number - b.number);
   const refs = useRef<(HTMLVideoElement | null)[]>([]);
@@ -387,13 +404,14 @@ function CompareView({ cur, cmp, setCmp, busy, onChoose, msg }: {
           </select></label>
         {t && <video ref={(el) => { refs.current[i] = el; }} key={t.id} className="cmp-video" src={`/api/media/${t.output_sha}`} controls loop playsInline preload="metadata" muted={i === 0} aria-label={`Take ${t.number}`} />}
         {t && <div className="cmp-foot">{t.id === cur.selected_take_id ? <Pill tone="accent">✓ Selected</Pill> : t.review === "approved" ? <Pill tone="ok">Approved</Pill> : t.review === "rejected" ? <Pill tone="bad">Rejected</Pill> : <Pill tone="info">Needs review</Pill>}
-          {t.id !== cur.selected_take_id && t.review !== "rejected" && <button className="small primary" disabled={busy} onClick={() => onChoose(t)}>Approve &amp; select take {t.number}</button>}</div>}
+          {t.id !== cur.selected_take_id && t.review !== "rejected" && <button className="small btn-review" disabled={busy} onClick={() => onChoose(t)}>Approve &amp; select take {t.number}</button>}</div>}
       </section>
     );
   };
   return (
     <div className="stage compare">
       <div className="stage-head"><h1>Compare takes · {cur.title}</h1><div className="spacer" />
+        <button className="ghost" aria-pressed={showDir} onClick={onToggleDir}>{showDir ? "Hide director" : "Show director"}</button>
         <button onClick={both}>{playing ? "Pause both" : "Play both"}</button>
         <button className="ghost" onClick={() => setCmp(null)}>Exit compare</button></div>
       <div className="cmp-grid">{side(cmp.a, "a", 0)}{side(cmp.b, "b", 1)}</div>

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { agentCap, approveBlock, cardTake, defaultTake, imageCap, nextAction, orderedShots, shotStatus, spendSummary, takeKind, videoCap } from "../src/derive.ts";
+import { agentCap, approveBlock, cardTake, defaultTake, imageCap, newConversationLabel, nextAction, orderedShots, shotStatus, spendSummary, takeKind, threadSendState, videoCap } from "../src/derive.ts";
 
 const take = (n: number, over: Record<string, unknown> = {}) => ({ id: `t${n}`, number: n, state: "succeeded", review: "unreviewed", output_sha: `sha${n}`,
   adapter: "comfy", is_paid: 1, parent_take_id: null, created_at: "", finished_at: null, ...over }) as any;
@@ -76,38 +76,57 @@ test("next action order: in-flight, review, plan draft, blocking asset, pending 
   assert.equal(nextAction([sel("a", 1), sel("b", 2)], approvedPlan, ready).kind, "export");
 });
 
-const status = (budget: Record<string, unknown>, is_paid = true) => ({ is_paid, budget: { budget_credits: 0, committed_credits: 543, remaining_credits: 0, attempts: 4, max_attempts: 0, key_configured: true, is_paid, ...budget } }) as any;
+const status = (budget: Record<string, unknown>, is_paid = true, generation?: Record<string, unknown>) => ({ is_paid, generation: generation ?? { mode: is_paid ? "paid" : "fake", ready: true, problems: [], approval: "each proposal" },
+  budget: { budget_credits: null, committed_credits: 543, remaining_credits: null, attempts: 4, max_attempts: null, key_configured: true, is_paid, ...budget } }) as any;
+const cfg = (o: Record<string, unknown> = {}) => ({ provider: "gemini", model: "gemini-3.8-flash", live: true, ready: true, problem: null, budget_usd: null, spent_usd: 0.09, max_live_requests: 60,
+  live_requests: 21, credentials: { gemini: true }, max_turns: 12, max_output_tokens: 1, limits: {}, ...o }) as any;
 
-test("video, image and director availability are separate and plain", () => {
-  const locked = videoCap(status({}));
-  assert.equal(locked.state, "locked"); assert.match(locked.detail, /cap is 0 credits/);
-  assert.equal(videoCap(status({ budget_credits: 200, max_attempts: 1, attempts: 0, committed_credits: 0 })).state, "available");
+test("generation readiness is plain and always says each proposal needs approval", () => {
+  const open = videoCap(status({}));
+  assert.equal(open.state, "ready"); assert.match(open.summary, /needs your approval/); assert.match(open.detail, /No overall limit/);
   assert.equal(videoCap(status({}, false)).state, "free");
-  assert.equal(imageCap({ is_paid: true, budget_credits: 0, max_attempts: 0, attempts: 0, committed_credits: 0 }).state, "locked");
-  const cfg = { provider: "scripted", model: "x", live: false, budget_usd: 0, spent_usd: 0.09, max_live_requests: 0, live_requests: 21, credentials: {}, max_turns: 1, max_output_tokens: 1 } as any;
-  assert.equal(agentCap(cfg).state, "free");
-  assert.equal(agentCap({ ...cfg, provider: "gemini", live: true, credentials: { gemini: true } }).state, "locked");
-  assert.equal(agentCap({ ...cfg, provider: "gemini", live: true, credentials: { gemini: true }, budget_usd: 1, max_live_requests: 5, live_requests: 1, spent_usd: 0.1 }).state, "available");
-  assert.equal(spendSummary([locked, imageCap(null), agentCap(cfg)]).tone, "locked");
-  assert.equal(spendSummary([videoCap(status({}, false)), { name: "Image", state: "free", summary: "", detail: "" }, agentCap(cfg)]).tone, "free");
-  assert.match(spendSummary([{ name: "Video", state: "available", summary: "", detail: "" }, locked]).label, /video/);
+  const noKey = videoCap(status({ key_configured: false }, true, { mode: "paid", ready: false, problems: ["COMFY_API_KEY is not configured"] }));
+  assert.equal(noKey.state, "problem"); assert.equal(noKey.summary, "no API key"); assert.match(noKey.detail, /COMFY_API_KEY/);
+  assert.equal(imageCap({ is_paid: true, budget_credits: 0, max_attempts: 0, attempts: 0, committed_credits: 0 }).state, "problem");
+  assert.equal(imageCap({ is_paid: true, budget_credits: null, max_attempts: null, attempts: 3, committed_credits: 16 }).state, "ready");
 });
 
-test("approve gate mirrors the server and explains itself", () => {
+test("the director is ready with a key and no hidden dollar cap; problems are named", () => {
+  assert.equal(agentCap(cfg()).state, "ready"); assert.match(agentCap(cfg()).detail, /No dollar limit is set/);
+  assert.equal(agentCap(cfg({ live: false, provider: "scripted" })).state, "free");
+  const p = agentCap(cfg({ ready: false, problem: "No gemini API key is configured" }));
+  assert.equal(p.state, "problem"); assert.match(p.summary, /no gemini API key/);
+});
+
+test("the header says Director ready · Generation requires approval, or what is wrong", () => {
+  const ok = spendSummary([videoCap(status({})), imageCap(null), agentCap(cfg())]);
+  assert.deepEqual(ok, { label: "Director ready · Generation requires approval", tone: "ready" });
+  const offline = spendSummary([videoCap(status({}, false)), imageCap(null), agentCap(cfg({ live: false, provider: "scripted" }))]);
+  assert.equal(offline.tone, "free"); assert.match(offline.label, /Director offline · Fake generation/);
+  const bad = spendSummary([videoCap(status({ key_configured: false }, true, { ready: false, problems: ["COMFY_API_KEY is not configured"] })), imageCap(null), agentCap(cfg({ ready: false, problem: "No gemini API key is configured" }))]);
+  assert.equal(bad.tone, "problem"); assert.match(bad.label, /Director: no gemini API key/); assert.match(bad.label, /Generation: no API key/);
+});
+
+test("approve gate: only real blockers, with reasons", () => {
   const p = { is_paid: 1, est_credits: 135.78 };
-  assert.match(approveBlock(p, status({}))!, /cap is 0/);
-  assert.equal(approveBlock(p, status({ budget_credits: 700, max_attempts: 5, attempts: 4, committed_credits: 543 })), null);
-  assert.match(approveBlock(p, status({ budget_credits: 600, max_attempts: 5, attempts: 4, committed_credits: 543 }))!, /already committed/);
+  assert.equal(approveBlock(p, status({})), null);                                                   // no overall limit: allowed
+  assert.match(approveBlock(p, status({ budget_credits: 0 }))!, /locked/);
+  assert.match(approveBlock(p, status({ budget_credits: 600, remaining_credits: 57 }))!, /already committed/);
+  assert.match(approveBlock(p, status({ max_attempts: 4, attempts: 4 }))!, /attempt limit reached/);
+  assert.match(approveBlock(p, status({ key_configured: false }))!, /No Comfy API key/);
+  assert.match(approveBlock(p, status({}, true, { ready: false, problems: ["ComfyUI isn't reachable at http://x"] }))!, /ComfyUI isn't reachable/);
   assert.equal(approveBlock({ is_paid: 0, est_credits: 1 }, status({}, false)), null);
 });
 
-import { newConversationLabel, threadSendState } from "../src/derive.ts";
-test("a thread keeps its own provider; the configured default only describes new conversations", () => {
-  const cfg = { provider: "scripted", model: "scripted-revise-v1", live: false, budget_usd: 0, spent_usd: 0.09, max_live_requests: 0, live_requests: 21, credentials: { gemini: true }, max_turns: 1, max_output_tokens: 1 } as any;
-  const old = threadSendState({ provider: "gemini", model: "gemini-3.8-flash" }, cfg);
-  assert.equal(old.kind, "live_locked"); assert.match(old.text, /sending would be refused/);
-  assert.equal(threadSendState({ provider: "scripted", model: "x" }, cfg).kind, "offline");
-  assert.equal(threadSendState({ provider: "gemini", model: "g" }, { ...cfg, budget_usd: 1, max_live_requests: 5, live_requests: 1 }).kind, "live_ok");
-  assert.equal(threadSendState({ provider: "gemini", model: "g" }, { ...cfg, credentials: {} }).kind, "live_locked");
-  assert.match(newConversationLabel(cfg), /offline stand-in/);
+test("a conversation keeps its own provider; limits are per message and per conversation", () => {
+  const t = { provider: "gemini", model: "gemini-3.8-flash" };
+  assert.equal(threadSendState(t, cfg(), 3).kind, "live_ok");
+  assert.match(threadSendState(t, cfg(), 3).text, /up to 12 model requests per message/);
+  assert.equal(threadSendState(t, cfg(), 60).kind, "live_locked");                                    // this conversation is full, not "lifetime"
+  assert.equal(threadSendState(t, cfg(), 0).kind, "live_ok");                                         // a new conversation starts fresh
+  assert.equal(threadSendState(t, cfg({ credentials: {} })).kind, "live_locked");
+  assert.equal(threadSendState(t, cfg({ budget_usd: 0 })).kind, "live_locked");
+  assert.equal(threadSendState(t, cfg({ max_live_requests: 0 })).kind, "live_locked");
+  assert.equal(threadSendState({ provider: "scripted", model: "x" }, cfg({ live: false })).kind, "offline");
+  assert.match(newConversationLabel(cfg()), /gemini gemini-3.8-flash \(live\)/);
 });

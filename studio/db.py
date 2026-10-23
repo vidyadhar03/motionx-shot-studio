@@ -375,6 +375,14 @@ CREATE TABLE IF NOT EXISTS workspace_imports (
   at TEXT NOT NULL
 );
 
+-- Limits a person sets in the app's Settings (see studio/limits.py). Per workspace; never imported by consolidation.
+CREATE TABLE IF NOT EXISTS workspace_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,             -- JSON (a number, or null for "no limit")
+  updated_by TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TRIGGER IF NOT EXISTS takes_snapshot_immutable
 BEFORE UPDATE OF snapshot, proposal_id, shot_id, number ON takes
 BEGIN SELECT RAISE(ABORT, 'take snapshot and identity are immutable'); END;

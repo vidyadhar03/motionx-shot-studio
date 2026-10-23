@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .balance import fetch_balance_credits
+from .limits import Limits
 from .compiler import choose_seed, compile_prompt
 from .config import Settings
 from .db import Database, dumps, new_id, now
@@ -58,15 +59,15 @@ class BudgetError(RuntimeError):
 @dataclass
 class BudgetStatus:
     is_paid: bool
-    budget_credits: float
+    budget_credits: float | None      # optional overall ceiling; None = none (each take is still approved one by one)
     committed_credits: float          # observed where known, otherwise reserved
     attempts: int
-    max_attempts: int
+    max_attempts: int | None
     key_configured: bool
 
     @property
-    def remaining_credits(self) -> float:
-        return round(self.budget_credits - self.committed_credits, 2)
+    def remaining_credits(self) -> float | None:
+        return None if self.budget_credits is None else round(self.budget_credits - self.committed_credits, 2)
 
     def as_dict(self) -> dict[str, Any]:
         return {**self.__dict__, "remaining_credits": self.remaining_credits}
@@ -96,27 +97,28 @@ class GenerationService:
                  clock: Callable[[], float] = time.time, sleep: Callable[[float], None] = time.sleep):
         self.db, self.ops, self.media, self.adapter, self.settings = db, ops, media, adapter, settings
         self.balance_fn, self.clock, self.sleep = balance_fn, clock, sleep
+        self.limits = Limits(db, settings)
 
     # -- spend ----------------------------------------------------------------------------------
     def budget(self) -> BudgetStatus:
         row = self.db.one("SELECT COUNT(*) AS n, COALESCE(SUM(COALESCE(observed_credits, reserved_credits)),0) AS c "
                           "FROM spend")
-        return BudgetStatus(is_paid=self.adapter.is_paid, budget_credits=self.settings.budget_credits,
+        return BudgetStatus(is_paid=self.adapter.is_paid, budget_credits=self.limits.video_credit_cap(),
                             committed_credits=round(row["c"], 2), attempts=row["n"],
-                            max_attempts=self.settings.max_paid_attempts,
+                            max_attempts=self.limits.video_attempt_cap(),
                             key_configured=bool(self.settings.comfy_api_key))
 
     def _check_budget(self, c, est: float) -> None:
         row = c.execute("SELECT COUNT(*) AS n, COALESCE(SUM(COALESCE(observed_credits, reserved_credits)),0) AS c "
                         "FROM spend").fetchone()
-        if self.settings.max_paid_attempts <= 0 or self.settings.budget_credits <= 0:
-            raise BudgetError("paid generation is disabled: set STUDIO_MAX_PAID_ATTEMPTS and STUDIO_BUDGET_CREDITS "
-                              "(both default to 0)")
-        if row["n"] >= self.settings.max_paid_attempts:
-            raise BudgetError(f"paid attempt limit reached ({row['n']}/{self.settings.max_paid_attempts})")
-        if row["c"] + est > self.settings.budget_credits:
-            raise BudgetError(f"this take needs ~{est} credits; {round(row['c'], 2)} of "
-                              f"{self.settings.budget_credits} are already committed")
+        cap, attempts = self.limits.video_credit_cap(), self.limits.video_attempt_cap()
+        if (cap is not None and cap <= 0) or (attempts is not None and attempts <= 0):
+            raise BudgetError("paid video generation is locked: its credit or attempt limit is set to 0 "
+                              "(see Settings, or STUDIO_BUDGET_CREDITS / STUDIO_MAX_PAID_ATTEMPTS)")
+        if attempts is not None and row["n"] >= attempts:
+            raise BudgetError(f"paid attempt limit reached ({row['n']}/{attempts})")
+        if cap is not None and row["c"] + est > cap:
+            raise BudgetError(f"this take needs ~{est} credits; {round(row['c'], 2)} of {cap} are already committed")
 
     # -- proposals ------------------------------------------------------------------------------
     def build_request(self, shot: dict, project: dict, workflow_id: str | None = None,

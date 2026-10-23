@@ -73,7 +73,8 @@ cp .env.example .env                          # set COMFY_API_KEY and STUDIO_ADA
 
 - **Key:** create one at https://platform.comfy.org/profile/api-keys. Each submission sends it to ComfyUI as `extra_data.api_key_comfy_org`. It's never stored or logged.
 - **Cost:** a 5 s 768P take is about 135.8 credits (≈ $0.64 at $1 = 211 credits).
-- **Limits:** the app caps paid spend with `STUDIO_BUDGET_CREDITS` and `STUDIO_MAX_PAID_ATTEMPTS`. In this repo's current setup the one authorised paid attempt (140 credits) is **already used**, so paid approvals return 402 until the owner raises the caps. Real runs are logged in [docs/RUNS.md](docs/RUNS.md).
+- **Approval:** every paid video or image is approved by a person, one concrete proposal at a time. One approval submits one generation at the cost shown; nothing is retried, batched or resubmitted automatically, and the director can prepare proposals but never approve them.
+- **Limits:** there is no hidden allowance. Optional overall limits (`STUDIO_BUDGET_CREDITS`, `STUDIO_MAX_PAID_ATTEMPTS`, and the image equivalents) are unset by default and can be set in Settings; an explicit 0 locks that kind of spending. Account balance is checked before every submission, and the ledger of earlier paid takes is kept as it was. Real runs are logged in [docs/RUNS.md](docs/RUNS.md).
 - **Verified against the real model:** one first-frame take (5 s, 768P, 135.78 credits). Everything else, including revisions and reference-to-video, is verified on the fake adapter only.
 - **ComfyUI shows a blank HTTP 403?** That's ComfyUI's CSRF guard refusing a `Sec-Fetch-Site: cross-site` request, e.g. a `127.0.0.1:8188` link clicked from another app or website. Type the address into the browser, or use **Open ComfyUI** in the app header (same host). The app's own SDK → proxy → ComfyUI calls aren't affected. Don't disable the guard: it stops other websites from queuing workflows on your machine.
 - **Don't restart ComfyUI while a take is generating.** ComfyUI keeps job history in memory, so the hosted job would still be billed but its output lost. Restarting this app is safe: takes resume on the same job.
@@ -115,13 +116,13 @@ One agent loop with four project-scoped tools (`list`, `read`, `write`, `propose
 
 | Provider | Use | Configure |
 |---|---|---|
-| `scripted` | Development default. A rule-based stand-in, **not an AI**, used to verify the plumbing offline | `STUDIO_AGENT_PROVIDER=scripted` |
+| `scripted` | Used when no Gemini key is configured. A rule-based stand-in, **not an AI**, used to verify the plumbing offline | `STUDIO_AGENT_PROVIDER=scripted` |
 | `replay` | Rehearsals: plays back a hand-authored, labelled script through the real tools. **Not an AI** | `STUDIO_AGENT_PROVIDER=replay`, `STUDIO_AGENT_REPLAY_FILE` |
-| `gemini` | **Default live provider.** Google Gen AI SDK, Interactions API, `gemini-3.8-flash` | `STUDIO_AGENT_PROVIDER=gemini`, `GEMINI_API_KEY`, `STUDIO_AGENT_BUDGET_USD>0` |
-| `anthropic` | Alternative live provider. `claude-opus-5-5` | `STUDIO_AGENT_PROVIDER=anthropic`, `ANTHROPIC_API_KEY`, `STUDIO_AGENT_BUDGET_USD>0` |
+| `gemini` | **Default whenever `GEMINI_API_KEY` is configured.** Google Gen AI SDK, Interactions API, `gemini-3.8-flash` | `GEMINI_API_KEY` (and optionally `STUDIO_AGENT_PROVIDER=gemini`) |
+| `anthropic` | Alternative live provider. `claude-opus-5-5` | `STUDIO_AGENT_PROVIDER=anthropic`, `ANTHROPIC_API_KEY` |
 
 - **No automatic fallback** between providers.
-- **LLM spend cap:** `STUDIO_AGENT_BUDGET_USD` is separate from Comfy credits. It defaults to 0, which blocks all live calls.
+- **Chat limits (Settings):** model requests per message (default 12) and per conversation (default 60) are safeguards that reset with every message or new conversation, not a lifetime allowance. An optional dollar limit is empty by default (no limit; usage is still counted and shown quietly in the conversation menu). An explicit 0 locks live chat. Only a message you send starts a turn: opening, reloading or switching conversations sends nothing. One message runs at a time per conversation, a repeated send is not run twice, and Stop ends a message before its next model request.
 - **Before a live run:** the model ID is verified with the provider.
 - **Live runs so far:** one bounded Gemini run (5 requests, calculated $0.0102, see `docs/RUNS.md`). The Anthropic provider is tested against mocked responses only.
 - **LLM cost** is shown three ways, never mixed (`/api/agent/accounting`):

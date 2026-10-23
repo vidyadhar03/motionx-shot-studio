@@ -1,6 +1,7 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ACTIVE, AgentConfig, api, Asset, Overview, Plan, Presets, Preparation, Project, Scene, ShotSummary, Status } from "./api";
 import { useGuardApi } from "./guard";
+import { useMedia } from "./layout";
 import { formatHash, parseHash, readSaved, resolveStart, Route, Section, writeSaved } from "./nav";
 
 export type ProjectFull = Project & { shots: ShotSummary[]; scenes: Scene[] };
@@ -37,7 +38,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [route, setRoute] = useState<Route>({ project: null, section: "overview", item: null });
   const [notes, setNotes] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [directorOpen, setDirectorOpen] = useState(false);
+  const [directorPref, setDirectorPref] = useState<boolean | null>(null);   // null = default: open beside the video on Shots (wide screens)
+  const wide = useMedia("(min-width: 1180px)");
   const [prefill, setPrefill] = useState<DirectorPrefill | null>(null);
   const drafts = useRef(new Map<string, string>());
   const routeRef = useRef(route); routeRef.current = route;
@@ -158,9 +160,11 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   const askDirector = useCallback((text: string, shotId: string | null = null) => {
     setPrefill({ nonce: Date.now(), text, shotId });
-    setDirectorOpen(true);
+    setDirectorPref(true);
   }, []);
 
+  const directorOpen = directorPref ?? (route.section === "shots" && wide);
+  const setDirectorOpen = setDirectorPref;
   const value = useMemo<Studio>(() => ({
     status, presets, agentCfg, projects, project, overview, assets, prep, plan, ready,
     section: route.section, item: route.item, notes, dismissNote: (i) => setNotes((n) => n.filter((_, j) => j !== i)),

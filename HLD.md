@@ -241,7 +241,7 @@ With `end_framing`, `camera_detail` and `audio` empty, the output is byte-identi
 ### 6.6 Limits, spend and verification
 
 - **Configuration:** `STUDIO_AGENT_PROVIDER` (`scripted` | `gemini` | `anthropic`), `STUDIO_AGENT_MODEL`, `STUDIO_AGENT_MAX_TURNS` (12), `STUDIO_AGENT_MAX_OUTPUT_TOKENS` (8,000), `STUDIO_AGENT_THINKING` (Gemini `thinking_level`, default `low`).
-- **Spend cap:** `STUDIO_AGENT_BUDGET_USD`, an **LLM** spend cap independent of Comfy credits. Default **0**, which blocks all live calls.
+- **Limits (updated 2026-10-23):** live chat is enabled for messages a person sends. Requests per message and per conversation are safeguards that reset; the dollar cap (`STUDIO_AGENT_BUDGET_USD` or Settings) is optional and unset by default, independent of Comfy credits; an explicit 0 locks live calls. One message at a time per conversation, idempotent sends, and Stop.
 - **Before every live call**, the loop checks a **pre-call estimate**, not a guaranteed bound: `spent + estimate ≤ cap`, plus a hard cap on the total number of live requests (`STUDIO_AGENT_MAX_LIVE_REQUESTS`).
   - Estimate = approximate input tokens (characters / 3.5 + 1,600 per image) × input price + (`max_output_tokens` + an assumed thinking allowance `STUDIO_AGENT_THOUGHT_ALLOWANCE`) × output price, from the dated table in `studio/agent/pricing.py`.
   - It isn't a bound because the input count is approximate, and the docs don't say whether `max_output_tokens` also caps thinking.
@@ -382,7 +382,7 @@ take: queued ─► submitting* ─► submitted(job_id) ─► running ─► g
 **Limits (application code, not the agent)**
 
 - **Spend ledger.** A credit reservation is written at approval in the same transaction as the take. Observed charge replaces the reservation once the balance delta is known.
-- **Hard caps.** `STUDIO_BUDGET_CREDITS` and `STUDIO_MAX_PAID_ATTEMPTS` (currently 140 / 1, already consumed) are checked at approval and at resubmission. A definite pre-job rejection releases its reservation.
+- **Per-proposal approval, optional overall caps (updated 2026-10-23).** A person approves each concrete proposal; one approval is one submission. `STUDIO_BUDGET_CREDITS` and `STUDIO_MAX_PAID_ATTEMPTS` are optional overall ceilings (unset by default, editable in Settings unless the environment sets them, explicit 0 locks). They are checked at approval and at resubmission. A definite pre-job rejection releases its reservation.
 - **Balance check.** The account balance must cover the estimate before submission. The read goes to `GET api.comfy.org/customers/balance` and is read-only; the app has no purchase path.
 - At most 1 running take.
 - Our own prompt length cap (4,000 characters).
@@ -476,7 +476,7 @@ Copying about 600 lines of patterns is cheaper and safer than untangling any of 
   - Optionally, it pins that version into the planned shots that list the asset, in the plan's reference order (character, location, props).
   - Rejected versions stay in history.
 - **Budget:**
-  - A separate image cap (`STUDIO_IMAGE_BUDGET_CREDITS`, `STUDIO_IMAGE_MAX_PAID_ATTEMPTS`; default 0 = disabled), independent of the video ledger and the LLM cap.
+  - A separate optional image cap (`STUDIO_IMAGE_BUDGET_CREDITS`, `STUDIO_IMAGE_MAX_PAID_ATTEMPTS`; unset by default, explicit 0 locks), independent of the video ledger and the LLM limits. Each image is approved one proposal at a time.
   - Observed charge = the balance delta when both readings exist. This assumes no other paid job runs at the same time.
 
 ### 11.3 Image workflow

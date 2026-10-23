@@ -15,6 +15,7 @@ import time
 from typing import Any, Callable
 
 from .config import Settings
+from .limits import Limits
 from .db import Database, dumps, new_id, now
 from .execution.base import (
     Adapter, ImageInput, ImageRequest, OutputUnavailable, ProviderTransientError, SubmissionOutcomeUnknown,
@@ -33,26 +34,27 @@ class AssetGenerations:
                  balance_fn: Callable[[str | None], float | None] | None = None):
         self.db, self.ops, self.media, self.adapter, self.settings = db, ops, media, adapter, settings
         self.balance_fn = balance_fn
+        self.limits = Limits(db, settings)
 
     # -- budget --------------------------------------------------------------------------------
     def budget(self) -> dict[str, Any]:
         row = self.db.one("SELECT COUNT(*) AS n, COALESCE(SUM(COALESCE(observed_credits, est_credits)),0) AS c "
                           "FROM asset_generations WHERE is_paid=1 AND status NOT IN ('pending','rejected')")
-        return {"is_paid": self.adapter.is_paid, "budget_credits": self.settings.image_budget_credits,
-                "max_attempts": self.settings.image_max_paid_attempts, "attempts": row["n"],
+        return {"is_paid": self.adapter.is_paid, "budget_credits": self.limits.image_credit_cap(),
+                "max_attempts": self.limits.image_attempt_cap(), "attempts": row["n"],
                 "committed_credits": round(row["c"], 2), "workflow": self.settings.image_workflow}
 
     def _check_budget(self, c, est: float) -> None:
-        if self.settings.image_max_paid_attempts <= 0 or self.settings.image_budget_credits <= 0:
-            raise BudgetError("paid image generation is disabled (STUDIO_IMAGE_BUDGET_CREDITS / "
-                              "STUDIO_IMAGE_MAX_PAID_ATTEMPTS are 0)")
+        cap, attempts = self.limits.image_credit_cap(), self.limits.image_attempt_cap()
+        if (cap is not None and cap <= 0) or (attempts is not None and attempts <= 0):
+            raise BudgetError("paid image generation is locked: its credit or attempt limit is set to 0 "
+                              "(see Settings, or STUDIO_IMAGE_BUDGET_CREDITS / STUDIO_IMAGE_MAX_PAID_ATTEMPTS)")
         row = c.execute("SELECT COUNT(*) AS n, COALESCE(SUM(COALESCE(observed_credits, est_credits)),0) AS c "
                         "FROM asset_generations WHERE is_paid=1 AND status NOT IN ('pending','rejected')").fetchone()
-        if row["n"] >= self.settings.image_max_paid_attempts:
-            raise BudgetError(f"paid image attempt limit reached ({row['n']}/{self.settings.image_max_paid_attempts})")
-        if row["c"] + est > self.settings.image_budget_credits:
-            raise BudgetError(f"image needs ~{est} credits but {round(row['c'], 2)} of "
-                              f"{self.settings.image_budget_credits} are already committed")
+        if attempts is not None and row["n"] >= attempts:
+            raise BudgetError(f"paid image attempt limit reached ({row['n']}/{attempts})")
+        if cap is not None and row["c"] + est > cap:
+            raise BudgetError(f"image needs ~{est} credits but {round(row['c'], 2)} of {cap} are already committed")
 
     # -- proposals -----------------------------------------------------------------------------
     def create_proposal(self, pid: str, handle: str, *, prompt: str, reference_version_ids: list[str] | None = None,

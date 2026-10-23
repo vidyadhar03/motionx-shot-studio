@@ -19,28 +19,30 @@ const KEEP_EMPTY = ["camera_detail", "audio", "lighting_detail"];
  *  what the person sees: unsaved, saving, saved, or not saved (with the reason). */
 export function useShotDraft(shot: Shot | null, onSaved: (s: Shot) => void, onError: (e: unknown) => void) {
   const [draft, setDraft] = useState<Draft>(() => (shot ? fromShot(shot) : {}));
+  // What the form was last synced to. "Unsaved" means different from THIS, not from whatever the server now holds, so a
+  // revision made elsewhere (the director, another save) never looks like the person's own unsaved edit.
+  const [synced, setSynced] = useState<Draft>(() => (shot ? fromShot(shot) : {}));
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState(0);
   const [, tick] = useState(0);
-  const base = useMemo(() => (shot ? fromShot(shot) : {}), [shot]);
-  const changes = useMemo(() => Object.fromEntries(Object.entries(draft).filter(([k, v]) => !same(v, base[k]))), [draft, base]);
+  const changes = useMemo(() => Object.fromEntries(Object.entries(draft).filter(([k, v]) => !same(v, synced[k]))), [draft, synced]);
   const dirty = !!shot && Object.keys(changes).length > 0;
-  const lastKey = useRef<string>("");
-
-  // Reset when another shot opens. When the same shot moves to a new revision (an agent edit, another save), adopt it
-  // unless there are unsaved edits, which are kept and flagged instead of being overwritten.
   const [outdated, setOutdated] = useState(false);
-  useEffect(() => {
-    if (!shot) return;
-    const key = `${shot.id}`;
-    if (key !== lastKey.current) { lastKey.current = key; setDraft(fromShot(shot)); setOutdated(false); setFailure(null); setSavedAt(0); return; }
-  }, [shot?.id]);                                                                       // eslint-disable-line react-hooks/exhaustive-deps
+  const lastId = useRef<string>("");
   const rev = useRef(shot?.revision);
+
+  const adopt = useCallback((s: Shot) => { const d = fromShot(s); setDraft(d); setSynced(d); setOutdated(false); }, []);
+  // Another shot opens: start from it.
   useEffect(() => {
-    if (!shot || shot.revision === rev.current) return;
+    if (!shot || shot.id === lastId.current) return;
+    lastId.current = shot.id; rev.current = shot.revision; adopt(shot); setFailure(null); setSavedAt(0);
+  }, [shot?.id]);                                                                       // eslint-disable-line react-hooks/exhaustive-deps
+  // The same shot moved to a new revision: adopt it unless the person has unsaved edits, which are kept and flagged.
+  useEffect(() => {
+    if (!shot || shot.id !== lastId.current || shot.revision === rev.current) return;
     rev.current = shot.revision;
-    if (dirty && !saving) setOutdated(true); else { setDraft(fromShot(shot)); setOutdated(false); }
+    if (dirty && !saving) setOutdated(true); else adopt(shot);
   }, [shot?.revision]);                                                                 // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -63,7 +65,7 @@ export function useShotDraft(shot: Shot | null, onSaved: (s: Shot) => void, onEr
     try {
       const s = await api.patchShot(shot.id, shot.revision, payload);
       rev.current = s.revision;
-      setDraft(fromShot(s)); setOutdated(false); setSavedAt(Date.now());
+      adopt(s); setSavedAt(Date.now());
       onSaved(s);
       return s;
     } catch (e) {
@@ -71,9 +73,9 @@ export function useShotDraft(shot: Shot | null, onSaved: (s: Shot) => void, onEr
       onError(e);
       return null;
     } finally { setSaving(false); }
-  }, [shot, dirty, changes, draft.refs, onSaved, onError]);
+  }, [shot, dirty, changes, draft.refs, onSaved, onError, adopt]);
 
-  const discard = useCallback(() => { if (shot) { setDraft(fromShot(shot)); setOutdated(false); setFailure(null); } }, [shot]);
+  const discard = useCallback(() => { if (shot) { adopt(shot); setFailure(null); } }, [shot, adopt]);
 
   const status: SaveStatus = saving ? { kind: "saving" } : failure ? { kind: "error", message: failure } : dirty ? { kind: "dirty" }
     : savedAt && Date.now() - savedAt < 4000 ? { kind: "saved", at: savedAt } : { kind: "clean" };

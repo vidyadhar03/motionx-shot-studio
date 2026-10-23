@@ -81,14 +81,14 @@ export default function ProposalTab({ shot, status, blockers, dirty, onPrepare, 
       <div className="cost">
         <div className="cost-main">{paid ? <><strong>{credits(p.est_credits)}</strong> <span className="muted">≈ ${(p.est_credits / 211).toFixed(2)}</span></>
           : <><strong>No cost</strong> <span className="muted">fake adapter · {credits(p.est_credits)} on the real route</span></>}</div>
-        {paid && <div className="muted">Video cap: {b.committed_credits.toFixed(0)} of {b.budget_credits.toFixed(0)} credits committed · attempts {b.attempts}/{b.max_attempts}</div>}
+        {paid && <div className="muted">{b.committed_credits.toFixed(0)} credits committed so far{b.budget_credits !== null ? ` of an overall ${b.budget_credits.toFixed(0)} limit` : " (no overall limit)"}. One approval submits this one generation.</div>}
       </div>
 
       {p.status === "pending" && (
         <div className="tab-actions col">
           <div className="row">
             <button className="ghost" disabled={busy} onClick={() => act(() => api.reject(p.id), onChanged)}>Reject proposal</button>
-            <button className="primary" disabled={busy || !!gate || blockers.length > 0} onClick={approve}>
+            <button className="btn-spend" disabled={busy || !!gate || blockers.length > 0} onClick={approve}>
               {paid ? `Approve & generate · ${credits(p.est_credits)}` : "Approve & generate (fake)"}</button>
           </div>
           {gate && <span className="reason">Can't approve now: {gate}</span>}

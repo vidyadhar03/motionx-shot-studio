@@ -8,7 +8,7 @@ const TAB: Record<Section, string> = { overview: "Overview", assets: "Assets", s
 
 export function useCaps() {
   const { status, prep, agentCfg } = useStudio();
-  const caps: Cap[] = [videoCap(status), imageCap(prep?.image_budget ?? null), agentCap(agentCfg)];
+  const caps: Cap[] = [videoCap(status), imageCap(prep?.image_budget ?? null, status), agentCap(agentCfg)];
   return { caps, summary: spendSummary(caps) };
 }
 
@@ -67,16 +67,17 @@ function SpendChip() {
   if (!S.status) return null;
   return (
     <div className="spend" ref={root} onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}>
-      <button className={`spend-chip ${summary.tone}`} aria-expanded={open} aria-haspopup="true" onClick={() => setOpen(!open)}>
-        <span className="lock" aria-hidden="true">{summary.tone === "locked" ? "🔒" : summary.tone === "enabled" ? "●" : "○"}</span>{summary.label}
+      <button className={`spend-chip ${summary.tone}`} aria-expanded={open} aria-haspopup="true" onClick={() => setOpen(!open)}
+              title="Director and generation status">
+        <span className="status-dot" aria-hidden="true" />{summary.label}
       </button>
       {open && (
         <div className="spend-pop" role="group" aria-label="Spending status">
-          <p className="muted">Each area has its own limit. Nothing here is one master switch, and every paid step still needs your approval.</p>
+          <p className="muted">The director chats and prepares proposals. Video and image generation each run only when you approve one concrete proposal. Nothing here is one master switch.</p>
           {caps.map((c) => (
             <div key={c.name} className="cap-row">
               <span className={`cap-dot ${c.state}`} aria-hidden="true" />
-              <div><strong>{c.name}</strong> <span className={`cap-state ${c.state}`}>{c.state === "free" ? "no spend" : c.state === "available" ? "can spend" : c.state === "locked" ? "locked" : "…"} · {c.summary}</span>
+              <div><strong>{c.name}</strong> <span className={`cap-state ${c.state}`}>{c.state === "free" ? "no spend" : c.state === "ready" ? "ready" : c.state === "problem" ? "needs attention" : "…"} · {c.summary}</span>
                 <div className="muted">{c.detail}</div></div>
             </div>))}
           <button className="small" onClick={() => { setOpen(false); document.dispatchEvent(new CustomEvent("open-settings")); }}>Open Settings</button>

@@ -129,45 +129,56 @@ export function nextAction(shots: OverviewShot[], plan: PlanLite, reqs: Req[]): 
   return { kind: "idle", title: "Nothing is waiting on you", detail: "Open a shot to keep working.", cta: "Open shots", section: "shots" };
 }
 
-// -- spending status --------------------------------------------------------------------------------
+// -- readiness and spending status ---------------------------------------------------------------
+// Video and image generation always need a person to approve each concrete proposal; the director only chats and
+// prepares proposals. "ready" therefore never means "will spend by itself".
 
-export type Cap = { name: "Video" | "Image" | "Director"; state: "free" | "locked" | "available" | "unknown"; summary: string; detail: string };
+export type Cap = { name: "Video" | "Image" | "Director"; state: "free" | "ready" | "problem" | "unknown"; summary: string; detail: string };
+const num = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
+
+const shortProblem = (p: string) => /ComfyUI/.test(p) ? "ComfyUI not running" : /COMFY_API_KEY|API key/i.test(p) ? "no API key" : /set to 0/.test(p) ? "limit set to 0" : /used up/.test(p) ? "limit used up" : p;
 
 export function videoCap(st: Status | null): Cap {
   if (!st) return { name: "Video", state: "unknown", summary: "unknown", detail: "Status not loaded." };
   const b = st.budget;
   if (!st.is_paid) return { name: "Video", state: "free", summary: "fake adapter", detail: "The fake adapter makes placeholder videos with no network calls and no cost." };
-  if (!b.key_configured) return { name: "Video", state: "locked", summary: "no API key", detail: "Paid video needs a Comfy API key in the environment." };
-  if (b.budget_credits <= 0 || b.max_attempts <= 0) return { name: "Video", state: "locked", summary: "locked", detail: `The video credit cap is ${b.budget_credits} credits and ${b.max_attempts} attempts, so no paid video can start.` };
-  const left = b.budget_credits - b.committed_credits;
-  if (b.attempts >= b.max_attempts || left <= 0) return { name: "Video", state: "locked", summary: "cap reached", detail: `${b.attempts} of ${b.max_attempts} attempts and ${b.committed_credits.toFixed(0)} of ${b.budget_credits.toFixed(0)} credits are already committed.` };
-  return { name: "Video", state: "available", summary: `up to ${left.toFixed(0)} cr`, detail: `${b.max_attempts - b.attempts} attempt(s) and ${left.toFixed(0)} credits remain under the cap. Each take still needs your approval.` };
+  if (st.generation && !st.generation.ready) {
+    const short = shortProblem(st.generation.problems[0] ?? "needs attention");
+    return { name: "Video", state: "problem", summary: short, detail: `${st.generation.problems.join("; ")}.` };
+  }
+  const limit = [b.budget_credits !== null ? `an overall limit of ${num(b.budget_credits)} credits (${num(b.remaining_credits ?? 0)} left)` : null,
+                 b.max_attempts !== null ? `${b.max_attempts} paid attempts overall` : null].filter(Boolean).join(" and ");
+  return { name: "Video", state: "ready", summary: "each take needs your approval",
+    detail: `Every video is approved one proposal at a time, at its shown cost. ${limit ? `Also: ${limit}.` : "No overall limit is set."} ${b.committed_credits.toFixed(0)} credits used so far across ${b.attempts} paid take(s).` };
 }
 
-export function imageCap(ib: Preparation["image_budget"] | null): Cap {
+export function imageCap(ib: Preparation["image_budget"] | null, st?: Status | null): Cap {
   if (!ib) return { name: "Image", state: "unknown", summary: "unknown", detail: "Open a project to see the image limits." };
   if (!ib.is_paid) return { name: "Image", state: "free", summary: "fake adapter", detail: "Placeholder images, no cost." };
-  if (ib.budget_credits <= 0 || ib.max_attempts <= 0) return { name: "Image", state: "locked", summary: "locked", detail: `The image credit cap is ${ib.budget_credits} credits and ${ib.max_attempts} attempts (separate from video).` };
-  const left = ib.budget_credits - ib.committed_credits;
-  if (ib.attempts >= ib.max_attempts || left <= 0) return { name: "Image", state: "locked", summary: "cap reached", detail: `${ib.attempts} of ${ib.max_attempts} attempts used.` };
-  return { name: "Image", state: "available", summary: `up to ${left.toFixed(0)} cr`, detail: `${ib.max_attempts - ib.attempts} attempt(s) remain. Each image still needs your approval.` };
+  if (st && !st.budget.key_configured) return { name: "Image", state: "problem", summary: "no API key", detail: "Paid images need a Comfy API key in the environment." };
+  if ((ib.budget_credits !== null && ib.budget_credits <= 0) || (ib.max_attempts !== null && ib.max_attempts <= 0))
+    return { name: "Image", state: "problem", summary: "limit set to 0", detail: "The image credit or attempt limit is 0, which locks paid images. Change it in Settings." };
+  if (ib.budget_credits !== null && ib.committed_credits >= ib.budget_credits) return { name: "Image", state: "problem", summary: "limit used up", detail: `${ib.committed_credits.toFixed(0)} of ${num(ib.budget_credits)} credits used.` };
+  if (ib.max_attempts !== null && ib.attempts >= ib.max_attempts) return { name: "Image", state: "problem", summary: "attempt limit used up", detail: `${ib.attempts} of ${ib.max_attempts} paid attempts used.` };
+  return { name: "Image", state: "ready", summary: "each image needs your approval", detail: `Every image is approved one proposal at a time. ${ib.budget_credits !== null ? `Overall limit ${num(ib.budget_credits)} credits.` : "No overall limit is set."}` };
 }
 
 export function agentCap(c: AgentConfig | null): Cap {
   if (!c) return { name: "Director", state: "unknown", summary: "unknown", detail: "Status not loaded." };
   if (!c.live) return { name: "Director", state: "free", summary: "offline", detail: `New conversations use the ${c.provider === "replay" ? "replay mock (hand-written answers)" : "scripted stand-in (rules, not an AI)"}. No live model calls, no cost.` };
   const name = `${c.provider} ${c.model}`;
-  if (!c.credentials[c.provider]) return { name: "Director", state: "locked", summary: "no API key", detail: `${name} needs a key in the environment.` };
-  if (c.budget_usd <= 0 || c.max_live_requests <= 0) return { name: "Director", state: "locked", summary: "live calls off", detail: `${name} is configured, but the live caps are $${c.budget_usd.toFixed(2)} and ${c.max_live_requests} requests, so no live call can be made.` };
-  if (c.spent_usd >= c.budget_usd || c.live_requests >= c.max_live_requests) return { name: "Director", state: "locked", summary: "cap reached", detail: `$${c.spent_usd.toFixed(3)} of $${c.budget_usd.toFixed(2)} and ${c.live_requests} of ${c.max_live_requests} requests used.` };
-  return { name: "Director", state: "available", summary: `$${(c.budget_usd - c.spent_usd).toFixed(2)} left`, detail: `${name}: ${c.max_live_requests - c.live_requests} request(s) and $${(c.budget_usd - c.spent_usd).toFixed(3)} remain. Each message you send makes live calls.` };
+  if (c.problem) return { name: "Director", state: "problem", summary: c.problem.replace(/^No /, "no ").replace(/\.$/, ""), detail: `${name}: ${c.problem}.` };
+  return { name: "Director", state: "ready", summary: name,
+    detail: `Chat with ${name}. Each message may use up to ${c.max_turns} model requests; a conversation up to ${c.max_live_requests ?? "any number of"}. ${c.budget_usd !== null ? `Dollar limit $${num(c.budget_usd)} ($${c.spent_usd.toFixed(3)} used).` : "No dollar limit is set."} The director can prepare proposals but never approve or spend.` };
 }
 
-export function spendSummary(caps: Cap[]): { label: string; tone: "locked" | "enabled" | "free" } {
-  const on = caps.filter((c) => c.state === "available");
-  if (on.length) return { label: `Spending on: ${on.map((c) => c.name.toLowerCase()).join(" + ")}`, tone: "enabled" };
-  if (caps.every((c) => c.state === "free")) return { label: "Offline · no spend", tone: "free" };
-  return { label: "Paid calls locked", tone: "locked" };
+export function spendSummary(caps: Cap[]): { label: string; tone: "ready" | "problem" | "free" } {
+  const [video, , director] = caps;
+  const d = !director || director.state === "unknown" ? "Director …" : director.state === "ready" ? "Director ready" : director.state === "free" ? "Director offline" : `Director: ${director.summary}`;
+  const g = !video || video.state === "unknown" ? "Generation …" : video.state === "ready" ? "Generation requires approval" : video.state === "free" ? "Fake generation" : `Generation: ${video.summary}`;
+  const problem = [video, director].some((c) => c?.state === "problem");
+  const allReady = video?.state === "ready" && director?.state === "ready";
+  return { label: `${d} · ${g}`, tone: problem ? "problem" : allReady ? "ready" : "free" };
 }
 
 /** Why approving a paid video proposal would be refused right now (mirrors the server's gate); null when allowed. */
@@ -175,9 +186,11 @@ export function approveBlock(p: { is_paid: number; est_credits: number }, st: St
   if (!p.is_paid) return null;
   const b = st.budget;
   if (!b.key_configured) return "No Comfy API key is configured.";
-  if (b.budget_credits <= 0 || b.max_attempts <= 0) return "Paid video generation is locked: the video credit cap is 0.";
-  if (b.attempts >= b.max_attempts) return `Paid attempt limit reached (${b.attempts}/${b.max_attempts}).`;
-  if (b.committed_credits + p.est_credits > b.budget_credits) return `This needs about ${p.est_credits.toFixed(0)} credits; ${b.committed_credits.toFixed(0)} of ${b.budget_credits.toFixed(0)} are already committed.`;
+  if ((b.budget_credits !== null && b.budget_credits <= 0) || (b.max_attempts !== null && b.max_attempts <= 0)) return "Paid video generation is locked: its credit or attempt limit is 0.";
+  if (b.max_attempts !== null && b.attempts >= b.max_attempts) return `Paid attempt limit reached (${b.attempts}/${b.max_attempts}).`;
+  if (b.budget_credits !== null && b.committed_credits + p.est_credits > b.budget_credits) return `This needs about ${p.est_credits.toFixed(0)} credits; ${b.committed_credits.toFixed(0)} of ${num(b.budget_credits)} are already committed.`;
+  const unreachable = st.generation?.problems.find((x) => /ComfyUI/.test(x));
+  if (unreachable) return `${unreachable[0].toUpperCase()}${unreachable.slice(1)}.`;
   return null;
 }
 
@@ -186,15 +199,18 @@ export function approveBlock(p: { is_paid: number; est_credits: number }, st: St
 export type ThreadSend = { kind: "offline" | "live_ok" | "live_locked"; text: string };
 /** What sending in THIS conversation would do now. A thread keeps the provider it was created with; the configured
  *  provider only decides what NEW conversations use. Live calls stay gated by the server whatever this says. */
-export function threadSendState(thread: { provider: string; model: string }, c: AgentConfig | null): ThreadSend {
-  if (thread.provider === "scripted") return { kind: "offline", text: "Replies come from the offline stand-in: simple rules, not an AI model. No cost." };
-  if (thread.provider === "replay") return { kind: "offline", text: "Replies are hand-written mock answers, not an AI model. No cost." };
-  if (!c) return { kind: "live_locked", text: "Checking whether live calls are allowed…" };
+export function threadSendState(thread: { provider: string; model: string }, c: AgentConfig | null, liveInThread = 0): ThreadSend {
+  if (thread.provider === "scripted") return { kind: "offline", text: "Offline stand-in: simple rules, not an AI model. No cost." };
+  if (thread.provider === "replay") return { kind: "offline", text: "Hand-written mock answers, not an AI model. No cost." };
+  if (!c) return { kind: "live_locked", text: "Checking whether live calls are possible…" };
   const name = `${thread.provider} ${thread.model}`;
-  if (!c.credentials[thread.provider]) return { kind: "live_locked", text: `Live calls are off: no ${thread.provider} key is configured, so sending would be refused.` };
-  if (c.budget_usd <= 0 || c.max_live_requests <= 0) return { kind: "live_locked", text: `Live calls are off: the director's spending cap is $${c.budget_usd.toFixed(2)} and ${c.max_live_requests} requests, so sending would be refused.` };
-  if (c.spent_usd >= c.budget_usd || c.live_requests >= c.max_live_requests) return { kind: "live_locked", text: "Live calls are off: the spending or request cap is used up, so sending would be refused." };
-  return { kind: "live_ok", text: `Sending makes live ${name} calls (up to $${(c.budget_usd - c.spent_usd).toFixed(2)} and ${c.max_live_requests - c.live_requests} requests left).` };
+  const perConv = c.max_live_requests;
+  if (!c.credentials[thread.provider]) return { kind: "live_locked", text: `No ${thread.provider} key is configured, so sending would be refused.` };
+  if (perConv !== null && perConv <= 0) return { kind: "live_locked", text: "Live calls are locked: requests per conversation is 0 (Settings)." };
+  if (c.budget_usd !== null && c.budget_usd <= 0) return { kind: "live_locked", text: "Live calls are locked: the director's dollar limit is 0 (Settings)." };
+  if (c.budget_usd !== null && c.spent_usd >= c.budget_usd) return { kind: "live_locked", text: "The director's dollar limit is used up (Settings)." };
+  if (perConv !== null && liveInThread >= perConv) return { kind: "live_locked", text: `This conversation has used its ${perConv} model requests. Start a new conversation to continue.` };
+  return { kind: "live_ok", text: `${name} · up to ${c.max_turns} model requests per message` };
 }
 export function newConversationLabel(c: AgentConfig | null): string {
   if (!c) return "…";
