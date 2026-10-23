@@ -363,6 +363,18 @@ BEFORE UPDATE OF request, settings, workflow_id, handle, est_credits ON asset_ge
 WHEN OLD.status != 'pending'
 BEGIN SELECT RAISE(ABORT, 'a decided asset generation is frozen'); END;
 
+-- Workspace consolidation audit: one row per import run (see studio/consolidate.py).
+CREATE TABLE IF NOT EXISTS workspace_imports (
+  id TEXT PRIMARY KEY,
+  source_path TEXT NOT NULL,
+  source_label TEXT NOT NULL,
+  backup_path TEXT NOT NULL,
+  inserted TEXT NOT NULL,          -- JSON {table: rows inserted}
+  skipped TEXT NOT NULL,           -- JSON {table: identical rows already present}
+  media_copied INTEGER NOT NULL,
+  at TEXT NOT NULL
+);
+
 CREATE TRIGGER IF NOT EXISTS takes_snapshot_immutable
 BEFORE UPDATE OF snapshot, proposal_id, shot_id, number ON takes
 BEGIN SELECT RAISE(ABORT, 'take snapshot and identity are immutable'); END;

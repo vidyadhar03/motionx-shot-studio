@@ -127,6 +127,9 @@ class _Stop(Exception):
 def rehearse(api: Api, out: Path | None, stop_after: int = 6, images: Path | None = None) -> None:
     status = api.call("GET", "/api/status")
     cfg = api.call("GET", "/api/agent/config")
+    if (status.get("workspace") or {}).get("kind") != "isolated":
+        raise SystemExit("refusing to rehearse in your canonical workspace: start the app with STUDIO_DATA_DIR=<a "
+                         "throwaway folder> so rehearsal projects stay out of your real work")
     if status.get("adapter") != "fake" or cfg["provider"] not in ("replay", "scripted") or cfg["live"]:
         raise SystemExit(f"refusing to rehearse: adapter={status.get('adapter')} agent={cfg['provider']} "
                          "(rehearsal needs the fake adapter and an offline agent)")

@@ -27,7 +27,7 @@ def _load_dotenv(path: Path) -> dict[str, str]:
 
 @dataclass(frozen=True)
 class Settings:
-    data_dir: Path
+    data_dir: Path                    # the workspace: studio.db + media/ (see studio/workspace.py)
     workflows_dir: Path
     adapter: str                      # "fake" | "comfy_local"
     comfy_base_url: str               # comfy-api-proxy in front of local ComfyUI
@@ -62,6 +62,7 @@ class Settings:
     anthropic_api_key: str | None = field(default=None, repr=False)
     fake_job_seconds: float = 3.0     # fake adapter: queued->running->succeeded duration
     fake_render: str = "ffmpeg"       # fake adapter: "ffmpeg" | "copy"
+    workspace_source: str = "default"  # "default" = canonical per-user workspace; "override" = STUDIO_DATA_DIR
 
     @property
     def db_path(self) -> Path:
@@ -72,6 +73,10 @@ class Settings:
         return self.data_dir / "media"
 
     @property
+    def workspace_kind(self) -> str:
+        return "canonical" if self.workspace_source == "default" else "isolated"
+
+    @property
     def is_paid(self) -> bool:
         return self.adapter != "fake"
 
@@ -80,8 +85,11 @@ class Settings:
         # An explicit env (tests) never picks up the developer's real .env and its key.
         merged = dict(env) if env is not None else {**_load_dotenv(ROOT / ".env"), **os.environ}
         g = merged.get
+        from .workspace import resolve
+        ws = resolve(merged, ROOT)
         return cls(
-            data_dir=Path(g("STUDIO_DATA_DIR") or ROOT / "data"),
+            data_dir=ws.path,
+            workspace_source=ws.source,
             workflows_dir=Path(g("STUDIO_WORKFLOWS_DIR") or ROOT / "workflows"),
             adapter=g("STUDIO_ADAPTER", "fake"),
             comfy_base_url=g("COMFY_BASE_URL", "http://127.0.0.1:8189"),

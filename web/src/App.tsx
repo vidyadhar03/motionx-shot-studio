@@ -35,8 +35,15 @@ export default function App() {
     refreshStatus();
     api.presets().then(setPresets).catch(fail);
     api.balance().then((b) => setBalance(b.credits)).catch(() => {});
-    api.projects().then((ps) => { setProjects(ps); if (ps[0]) refreshProject(ps[0].id); }).catch(fail);
+    // Restore the last project opened in THIS workspace (keyed by its path), else the newest one.
+    Promise.all([api.projects(), api.status()]).then(([ps, st]) => {
+      setProjects(ps);
+      const last = readLast(st.workspace.path);
+      const pick = ps.find((p) => p.id === last) ?? ps[0];
+      if (pick) refreshProject(pick.id);
+    }).catch(fail);
   }, [refreshStatus, refreshProject]);
+  useEffect(() => { if (project && status) writeLast(status.workspace.path, project.id); }, [project?.id, status?.workspace.path]);
 
   // Poll while any take is in flight. Polling is authoritative; nothing relies on push.
   useEffect(() => {
@@ -93,6 +100,9 @@ export default function App() {
           <a className="ghost-link" href={`${location.protocol}//${location.hostname}:${status.comfyui_port}/`}
              target="_blank" rel="noreferrer">Open ComfyUI</a>
         )}
+        {status?.workspace.kind === "isolated" && (
+          <div className="badge fake" title={status.workspace.path}>ISOLATED WORKSPACE · not your real projects</div>
+        )}
         {status && <AdapterBadge status={status} balance={balance} />}
       </header>
 
@@ -131,6 +141,7 @@ export default function App() {
                   );
                 })}
               <AssetsPanel projectId={project.id} assets={assets} onChanged={() => refreshProject(project.id)} onError={fail} />
+              {status && <WorkspaceInfo status={status} />}
             </>
           ) : (
             <div className="empty">Create a project to start.<br /><button onClick={newProject}>New project</button></div>
@@ -192,6 +203,30 @@ export default function App() {
         </main>
       </div>
     </div>
+  );
+}
+
+const LAST_KEY = (ws: string) => `motionx.lastProject:${ws}`;
+function readLast(ws: string): string | null {
+  try { return localStorage.getItem(LAST_KEY(ws)); } catch { return null; }
+}
+function writeLast(ws: string, id: string) {
+  try { localStorage.setItem(LAST_KEY(ws), id); } catch { /* private mode: just don't remember */ }
+}
+
+function WorkspaceInfo({ status }: { status: Status }) {
+  const w = status.workspace;
+  return (
+    <details className="workspace-info">
+      <summary>Workspace · {w.kind === "canonical" ? "your workspace" : "isolated (dev override)"} · {w.projects} project{w.projects === 1 ? "" : "s"}</summary>
+      <dl>
+        <dt>Location</dt><dd><code>{w.path}</code></dd>
+        <dt>Database</dt><dd><code>{w.db}</code></dd>
+        <dt>Media</dt><dd><code>{w.media}</code></dd>
+        <dt>Source</dt><dd>{w.source === "default" ? "default per-user location" : "STUDIO_DATA_DIR override"}</dd>
+        <dt>Adapter</dt><dd>{status.adapter}{status.is_paid ? " (paid route)" : " (fake, no spend)"}</dd>
+      </dl>
+    </details>
   );
 }
 

@@ -146,6 +146,8 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
                balance_fn: Callable[[str | None], float | None] = fetch_balance_credits,
                start_worker: bool = True) -> FastAPI:
     settings = settings or Settings.from_env()
+    from .workspace import ensure_marker
+    marker = ensure_marker(settings.data_dir, settings.workspace_kind)
     db = Database(settings.db_path)
     media = MediaStore(db, settings.media_dir)
     ops = Ops(db)
@@ -223,6 +225,10 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     def status() -> dict:
         b = service.budget().as_dict()
         return {"adapter": adapter.name, "is_paid": adapter.is_paid, "budget": b,
+                "workspace": {"path": str(settings.data_dir), "kind": settings.workspace_kind,
+                              "source": settings.workspace_source, "db": str(settings.db_path),
+                              "media": str(settings.media_dir), "marker_kind": marker.get("kind"),
+                              "projects": len(ops.list_projects())},
                 "versions": adapter.versions(), "feedback_reasons": FEEDBACK_REASONS,
                 "comfyui_port": urlsplit(settings.comfyui_url).port}
 
@@ -550,7 +556,10 @@ def run() -> None:
     import uvicorn
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     s = Settings.from_env()
-    log.info("adapter=%s data=%s key_configured=%s budget=%s credits / %s attempts", s.adapter, s.data_dir,
+    if s.workspace_source != "default":
+        log.warning("ISOLATED workspace (STUDIO_DATA_DIR override): %s. Your canonical workspace is not open.", s.data_dir)
+    log.info("adapter=%s workspace=%s (%s) key_configured=%s budget=%s credits / %s attempts", s.adapter, s.data_dir,
+             s.workspace_kind,
              bool(s.comfy_api_key), s.budget_credits, s.max_paid_attempts)
     uvicorn.run(create_app(s), host="127.0.0.1", port=int(__import__("os").environ.get("STUDIO_PORT", "8700")))
 

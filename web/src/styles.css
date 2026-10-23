@@ -251,3 +251,8 @@ label.inline select { width: auto; }
   .obs-grid, .plan-form .row, .gen-form .row { grid-template-columns: 1fr; }
   .gen-card, .gen-form { margin-left: 0; }
 }
+
+/* Workspace diagnostics */
+.workspace-info { margin-top: 16px; font-size: 12px; color: var(--muted); }
+.workspace-info dl { grid-template-columns: 70px 1fr; }
+.workspace-info code { word-break: break-all; font-size: 11px; }

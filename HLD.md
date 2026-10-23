@@ -536,3 +536,15 @@ Facts below come from the installed templates and the ComfyUI 0.42.1 node source
 - **Records:** the new fields are part of shot revisions, plan shots, proposal freshness (any field change bumps the shot revision), take snapshots and exports.
 - **Old prompts:** unset by default. Prompts without them are byte-identical: verified by recompiling both real takes' submitted prompts and the pending demo proposal on database copies.
 - **Possible later additions, not built:** shortcut lists for genre/tone, era and palette in the project direction, keeping the custom text. Also a camera-angle field (eye level / low / high).
+
+## 13. Workspace persistence (2026-10-23)
+
+- **One canonical workspace per user and installation:** the per-user application-data folder holding `studio.db` and `media/`.
+  - It's what `./scripts/run_app.sh` opens, from any directory.
+  - `STUDIO_DATA_DIR` is a development override, labelled "isolated" in the API, the UI and the logs. Rehearsal tooling requires it.
+- **Media are content-addressed** (sha256), so execution resolves image inputs by hash in the active workspace. Stored requests and snapshots are historical records and are never rewritten.
+- **Consolidation of older folders is explicit, backed up and repeatable** (`studio/consolidate.py`):
+  - text and composite keys are kept, and identical rows skipped;
+  - any differing row is a conflict that stops the import;
+  - auto-numbered history rows are matched on content;
+  - every run is recorded in `workspace_imports`.

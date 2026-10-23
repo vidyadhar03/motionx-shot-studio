@@ -21,21 +21,44 @@ Design: [HLD.md](HLD.md) · Plan and status: [IMPLEMENTATION_PLAN.md](IMPLEMENTA
 | Media (recommended) | `ffmpeg` + `ffprobe`. The fake adapter renders placeholder clips with ffmpeg (otherwise it copies a bundled sample), and ffprobe records duration, size and audio of saved takes |
 | Real route only | About 2 GB of disk for ComfyUI + torch in `./runtime` (1.7 GB measured); a Comfy account API key with credits |
 
-## Quick start (no account, no spend)
+## First-time setup (once per machine)
 
 ```bash
 git clone <this repo> motionx-shot-studio && cd motionx-shot-studio
 uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e ".[dev]"
 (cd web && npm ci && npm run build)
+```
+
+## Everyday startup
+
+```bash
 ./scripts/run_app.sh            # http://127.0.0.1:8700
 ```
 
-Default startup is safe:
-- **Video:** the `fake` adapter, which makes no network calls and labels every output `FAKE`.
-- **Agent:** the `scripted` provider, a rule-based stand-in with no LLM.
-- **Live LLM calls:** blocked (`STUDIO_AGENT_BUDGET_USD=0`, `STUDIO_AGENT_MAX_LIVE_REQUESTS=0`).
+That's the only command you need day to day. It always opens **your workspace**: one database plus its media, in a per-user folder that doesn't depend on where you run the command from, and survives restarts, reinstalls and UI rebuilds.
 
-No `.env` file is needed for any of this.
+| OS | Workspace |
+|---|---|
+| macOS | `~/Library/Application Support/MotionX Shot Studio/workspace` |
+| Linux | `$XDG_DATA_HOME/motionx-shot-studio/workspace` (default `~/.local/share/...`) |
+| Windows | `%APPDATA%\MotionX Shot Studio\workspace` |
+
+- **Where it is:** the sidebar's *Workspace* panel shows the active location. So do `.venv/bin/python scripts/workspace.py where` and `GET /api/status`.
+- **Last project:** the app reopens the last project you selected.
+- **Defaults:** with no `.env`, video uses the `fake` adapter (no network, every output labelled `FAKE`) and the agent is the `scripted` stand-in, with live LLM calls blocked.
+
+**Isolated workspaces (development only).** Set `STUDIO_DATA_DIR=<folder>` to run tests or rehearsals against a separate workspace; a relative path resolves against the repo. The app then shows **ISOLATED WORKSPACE**, and `scripts/demo.py rehearse` refuses to run anywhere else, so rehearsals never mix into your real projects. Don't put `STUDIO_DATA_DIR` in `.env` for everyday use.
+
+**Older data folders** (`./data`, `./data-*` from before the workspace existed):
+- **Classify them:** `.venv/bin/python scripts/workspace.py scan` labels each one *real*, *test* or *rehearsal*.
+- **Merge the real ones:** `.venv/bin/python scripts/workspace.py consolidate --source data --source data-flyover-live`. Stop the app first.
+- **What consolidation does:**
+  - backs each source up first, under `<app data>/backups/<time>/`;
+  - never modifies the sources;
+  - keeps ids, history, snapshots and media bytes;
+  - stops on conflicting records instead of overwriting;
+  - is safe to repeat.
+- **Undo:** `scripts/workspace.py rollback` moves the workspace aside without deleting anything.
 
 ## Real generation (MiniMax H3 via local ComfyUI)
 

@@ -474,7 +474,19 @@ class GenerationService:
 
     def _request(self, t: dict) -> RenderRequest:
         p = self.get_proposal(self.db.one("SELECT proposal_id FROM takes WHERE id=?", t["id"])["proposal_id"])
-        return RenderRequest.from_json(p["request"])
+        req = dict(p["request"])
+        # Stored paths are where the media lived when proposed (another folder, another cwd). Execution always
+        # reads the bytes from this workspace's media store by content hash; the stored request is unchanged.
+        def rebind(img: dict | None) -> dict | None:
+            if img is None:
+                return None
+            rec = self.media.get(img["sha256"])
+            if rec is None:
+                raise ValueError(f"media {img['sha256'][:12]} is missing from this workspace")
+            return {**img, "path": str(self.media.path(rec))}
+        req["start_frame"] = rebind(req.get("start_frame"))
+        req["references"] = [rebind(r) for r in req.get("references") or []]
+        return RenderRequest.from_json(req)
 
     def _release_reservation(self, tid: str) -> None:
         with self.db.tx() as c:

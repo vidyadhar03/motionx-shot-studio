@@ -295,6 +295,28 @@ A fresh `git clone` of commit `510696e` into an empty directory. No `.env`, `dat
 | Verification | 167 tests; UI typecheck and build; a fake-mode walkthrough. Agent path: labelled replay mock writing `truck_right` + `lighting_detail` and proposing. Manual path: editor set truck left, shallow, lighting detail; warnings shown; prompt compiled |
 | Later (not built) | Genre/tone, era and palette shortcut lists that keep custom text; a camera-angle field |
 
+## 5i. Workspace persistence (2026-10-23, offline)
+
+- **One canonical per-user workspace** (`studio/workspace.py`).
+  - On macOS: `~/Library/Application Support/MotionX Shot Studio/workspace`.
+  - Resolved independently of the current directory.
+  - `STUDIO_DATA_DIR` remains an explicit, labelled "isolated" override; relative paths resolve against the repo.
+  - A `workspace.json` marker records the kind.
+- **Execution reads media by content hash** from the active workspace. Older proposals stored folder-relative paths; those stored records are left unchanged.
+- **`scripts/workspace.py`** (`where`, `scan`, `consolidate`, `verify`, `rollback`) and `studio/consolidate.py`:
+  - a consistent SQLite backup plus media copy before importing;
+  - staging copies for schema upgrades (sources only read);
+  - ids preserved; auto-numbered rows renumbered in order;
+  - conflicts refused; same-hash media metadata resolved explicitly;
+  - media bytes verified; FK check before commit; an audit row per run; repeatable.
+- **Consolidated:** `data` (H3 smoke, real take 1) and `data-flyover-live` (Under the Flyover).
+- **Excluded:**
+  - `data-live1`: synthetic agent test, fake video, 5 real Gemini requests;
+  - `data-fake`, `data-m2`/`m3`/`m4`, `data-demo-flyover`, `data-demo-m7`: fake-only rehearsals.
+- **Ledger totals** are the sums of the two sources (543.12 credits, 21 live LLM requests). No new allowance; all caps 0.
+- **UI:** a Workspace panel (location, database, media, source, adapter), an ISOLATED badge for overrides, and the last project restored per workspace.
+- **Tests:** 12 new (path stability, migration integrity, repeat runs, conflicts, untouched sources, running an imported proposal, rehearsal refusal); 179 total.
+
 ## 6. Main risks
 
 | Risk | Mitigation |

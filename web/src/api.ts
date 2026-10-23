@@ -46,8 +46,11 @@ export type Take = {
   events: { state: string; detail: string | null; at: string }[];
 };
 
+export type Workspace = { path: string; kind: "canonical" | "isolated"; source: string; db: string; media: string;
+  marker_kind: string; projects: number };
 export type Status = {
   adapter: string; is_paid: boolean; versions: Record<string, string>; feedback_reasons: string[]; comfyui_port: number | null;
+  workspace: Workspace;
   budget: { budget_credits: number; committed_credits: number; remaining_credits: number; attempts: number;
             max_attempts: number; key_configured: boolean; is_paid: boolean };
 };
