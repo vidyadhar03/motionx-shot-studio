@@ -78,6 +78,19 @@ cp .env.example .env                          # set COMFY_API_KEY and STUDIO_ADA
 - **ComfyUI shows a blank HTTP 403?** That's ComfyUI's CSRF guard refusing a `Sec-Fetch-Site: cross-site` request, e.g. a `127.0.0.1:8188` link clicked from another app or website. Type the address into the browser, or use **Open ComfyUI** in the app header (same host). The app's own SDK → proxy → ComfyUI calls aren't affected. Don't disable the guard: it stops other websites from queuing workflows on your machine.
 - **Don't restart ComfyUI while a take is generating.** ComfyUI keeps job history in memory, so the hosted job would still be billed but its output lost. Restarting this app is safe: takes resume on the same job.
 
+## The interface
+
+Three sections in the header, plus the director, Export and Settings:
+
+- **Overview:** the film's title and synopsis, asset readiness, how many shots have a selected take, one card per shot (the selected take, else the latest playable one, else an honest placeholder), and a single **next step**. Reviewing existing takes always comes before suggesting another generation, and a shot that an asset still blocks is never suggested for generation. The full brief, decisions and the approved plan (every revision, labelled approved, draft or superseded) open on demand.
+- **Assets:** a grid of images with their chosen version and readiness. Selecting one opens its description, upload and generate actions, version history with Choose/Reject, reference-only restrictions and provenance. Prompts and generation records are collapsed.
+- **Shots:** the working screen. A shot strip, a large player, takes underneath (selected, approved, rejected, to review, failed), and one set of actions for the take you're viewing (**Approve & select**, Reject, Feedback, Compare, More). The right inspector has **Direction** (every creative field, references and output), **Proposal** (inputs, cost, freshness, blockers, the approval action, the compiled prompt) and **Details** (the viewed take's recorded inputs, feedback and execution history, kept apart from the editable shot). Compare gives two takes the whole workspace.
+- **Ask director:** the conversation opens in the same right-hand slot as the inspector, from any section, with a way back. Each conversation shows the model it used, separately from what new conversations will use. Drafts and threads survive switching panels. "Revise with director" only fills the message box.
+- **Settings:** workspace location, generation route and versions, and the three separate spending limits (video, image, director) with their ledgers. These are read-only: limits are set with environment variables at startup.
+- **Header spending chip:** says in plain words whether any paid call is possible; its details separate video, image and director.
+
+The app remembers the last project, section, shot and asset per workspace (and in the URL, `#/<project>/<section>/<shot or asset>`). Nothing autosaves: edits stay local until you press Save, the place you are editing shows Unsaved / Saving / Saved, and leaving with unsaved edits asks whether to save, discard or stay.
+
 ## What you can do
 
 - **Projects:** a brief and direction (tone, era, palette, notes) that go into every prompt.
@@ -143,6 +156,7 @@ One agent loop with four project-scoped tools (`list`, `read`, `write`, `propose
 ## Tests
 
 ```bash
+(cd web && npm test)                      # view logic: next step, shot/take state, routing memory, spending status
 .venv/bin/python -m pytest -q             # offline; fake video adapter, scripted agent, mocked Gemini/Anthropic SDKs
 .venv/bin/python scripts/comfy_check.py graphs   # offline: ComfyUI validates the real graphs, runs nothing
 ```

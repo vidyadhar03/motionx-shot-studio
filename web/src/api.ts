@@ -62,6 +62,7 @@ export type Presets = { presets: Record<string, string[]>; labels: Record<string
 export type Decision = { id: string; text: string; decided_by: string; at: string };
 export type Revision = { revision: number; author: string; at: string; diff: Record<string, { from: unknown; to: unknown }> };
 export type AgentConfig = { provider: string; model: string; live: boolean; budget_usd: number; spent_usd: number;
+                            max_live_requests: number; live_requests: number; thinking?: string;
                             max_turns: number; max_output_tokens: number; credentials: Record<string, boolean> };
 export type AgentThread = { id: string; project_id: string; provider: string; model: string; title: string; created_at: string };
 export type AgentMessage = { id: number; kind: "user" | "assistant_text" | "notice"; at: string;
@@ -69,7 +70,21 @@ export type AgentMessage = { id: number; kind: "user" | "assistant_text" | "noti
 export type AgentCall = { id: number; call_id: string; name: string; input: Record<string, any>; status: string;
                           result: { content: Record<string, any>; is_error: boolean; images: { mime: string; sha256: string }[] } | null;
                           started_at: string; finished_at: string | null };
-export type ThreadView = { thread: AgentThread; messages: AgentMessage[]; tool_calls: AgentCall[]; live_spend_usd: number };
+export type AgentUsage = { id: number; thread_id: string; provider: string; model: string; live: number; est_usd: number;
+                           input_tokens: number; output_tokens: number; at?: string };
+export type ThreadView = { thread: AgentThread; messages: AgentMessage[]; tool_calls: AgentCall[]; live_spend_usd: number;
+                           usage?: AgentUsage[] };
+
+// Read-only per-shot summary (GET /api/projects/:id/overview): light takes, selection, open proposal, video blockers.
+export type OverviewTake = { id: string; number: number; state: string; review: string; output_sha: string | null;
+                             adapter: string; is_paid: number; parent_take_id: string | null; created_at: string; finished_at: string | null };
+export type OpenProposal = { id: string; status: "pending" | "stale"; est_credits: number; is_paid: number; created_by: string;
+                             created_at: string; stale_reason: string | null; shot_revision: number };
+export type OverviewShot = { id: string; title: string; scene_id: string | null; order_idx: number; mode: string; locked: boolean;
+                             revision: number; duration_s: number; selected_take_id: string | null; takes: OverviewTake[];
+                             open_proposal: OpenProposal | null; blockers: string[] };
+export type Overview = { project_id: string; shots: OverviewShot[] };
+export type PlanRevisionDoc = { plan_id: string; revision: number; author: string; note: string; at: string; content: PlanContent };
 
 export type ExportPreview = {
   manifest_version: string;
@@ -172,6 +187,8 @@ export const api = {
     call<Plan>("PUT", `/api/projects/${pid}/plan`, { content, expected_revision, note }),
   approvePlan: (planId: string, expected_revision: number) =>
     call<{ plan: Plan; report: Record<string, any> }>("POST", `/api/plans/${planId}/approve`, { expected_revision }),
+  overview: (pid: string) => call<Overview>("GET", `/api/projects/${pid}/overview`),
+  planRevision: (planId: string, revision: number) => call<PlanRevisionDoc>("GET", `/api/plans/${planId}/revisions/${revision}`),
   planDiff: (planId: string, a: number, b: number) => call<Record<string, any>>("GET", `/api/plans/${planId}/diff?a=${a}&b=${b}`),
   preparation: (pid: string) => call<Preparation>("GET", `/api/projects/${pid}/preparation`),
   imageWorkflow: () => call<ImageWorkflow>("GET", "/api/image-workflow"),

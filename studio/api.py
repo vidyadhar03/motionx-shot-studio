@@ -27,6 +27,7 @@ from .agent.loop import AgentBudgetError, AgentRunner
 from .agent.providers.base import ProviderConfigError
 from .agent.store import AgentStore
 from .assetgen import AssetGenerations
+from .overview import project_overview
 from .planning import Planning
 
 log = logging.getLogger("studio")
@@ -258,6 +259,11 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     def get_project(pid: str) -> dict:
         return {**ops.get_project(pid), "shots": ops.list_shots(pid), "scenes": ops.list_scenes(pid)}
 
+    @app.get("/api/projects/{pid}/overview")
+    def overview(pid: str) -> dict:
+        """Read-only: per-shot takes (light), selection, open proposal and video blockers."""
+        return project_overview(db, ops, planning, pid)
+
     # -- export ---------------------------------------------------------------------------------
     exporter = Exporter(ops, media)
 
@@ -288,6 +294,11 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     def put_plan(pid: str, body: PlanIn) -> dict:
         return planning.write_plan(pid, body.content, expected_revision=body.expected_revision, author="user",
                                    note=body.note)
+
+    @app.get("/api/plans/{plan_id}/revisions/{revision}")
+    def plan_revision(plan_id: str, revision: int) -> dict:
+        """Read-only: the exact content of one saved revision (the approved one stays readable after newer drafts)."""
+        return planning.plan_revision(plan_id, revision)
 
     @app.get("/api/plans/{plan_id}/diff")
     def plan_diff(plan_id: str, a: int, b: int) -> dict:
