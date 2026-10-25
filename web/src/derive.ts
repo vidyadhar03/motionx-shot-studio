@@ -133,15 +133,19 @@ export function nextAction(shots: OverviewShot[], plan: PlanLite, reqs: Req[]): 
 // Video and image generation always need a person to approve each concrete proposal; the director only chats and
 // prepares proposals. "ready" therefore never means "will spend by itself".
 
-export type Cap = { name: "Video" | "Image" | "Director"; state: "free" | "ready" | "problem" | "unknown"; summary: string; detail: string };
+export type Cap = { name: "Video" | "Image" | "Director"; state: "free" | "ready" | "starting" | "problem" | "unknown"; summary: string; detail: string };
 const num = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
 
-const shortProblem = (p: string) => /ComfyUI/.test(p) ? "ComfyUI not running" : /COMFY_API_KEY|API key/i.test(p) ? "no API key" : /set to 0/.test(p) ? "limit set to 0" : /used up/.test(p) ? "limit used up" : p;
+const shortProblem = (p: string) => /^comfy-api-proxy unavailable/.test(p) ? "proxy unavailable" : /^ComfyUI unavailable/.test(p) ? "ComfyUI unavailable" : /ComfyUI/.test(p) ? "ComfyUI not running" : /COMFY_API_KEY|API key/i.test(p) ? "no API key" : /set to 0/.test(p) ? "limit set to 0" : /used up/.test(p) ? "limit used up" : p;
 
 export function videoCap(st: Status | null): Cap {
   if (!st) return { name: "Video", state: "unknown", summary: "unknown", detail: "Status not loaded." };
   const b = st.budget;
   if (!st.is_paid) return { name: "Video", state: "free", summary: "fake adapter", detail: "The fake adapter makes placeholder videos with no network calls and no cost." };
+  if (st.generation?.state === "starting") {
+    const s = Object.values(st.generation.services ?? {}).find((x) => x.state !== "ready");
+    return { name: "Video", state: "starting", summary: "starting…", detail: s ? `Starting local services: ${s.detail}.` : "Starting local services." };
+  }
   if (st.generation && !st.generation.ready) {
     const short = shortProblem(st.generation.problems[0] ?? "needs attention");
     return { name: "Video", state: "problem", summary: short, detail: `${st.generation.problems.join("; ")}.` };
@@ -172,13 +176,14 @@ export function agentCap(c: AgentConfig | null): Cap {
     detail: `Chat with ${name}. Each message may use up to ${c.max_turns} model requests; a conversation up to ${c.max_live_requests ?? "any number of"}. ${c.budget_usd !== null ? `Dollar limit $${num(c.budget_usd)} ($${c.spent_usd.toFixed(3)} used).` : "No dollar limit is set."} The director can prepare proposals but never approve or spend.` };
 }
 
-export function spendSummary(caps: Cap[]): { label: string; tone: "ready" | "problem" | "free" } {
+export function spendSummary(caps: Cap[]): { label: string; tone: "ready" | "problem" | "free" | "starting" } {
   const [video, , director] = caps;
   const d = !director || director.state === "unknown" ? "Director …" : director.state === "ready" ? "Director ready" : director.state === "free" ? "Director offline" : `Director: ${director.summary}`;
-  const g = !video || video.state === "unknown" ? "Generation …" : video.state === "ready" ? "Generation requires approval" : video.state === "free" ? "Fake generation" : `Generation: ${video.summary}`;
+  const g = !video || video.state === "unknown" ? "Generation …" : video.state === "ready" ? "Generation requires approval" : video.state === "free" ? "Fake generation"
+    : video.state === "starting" ? "Generation starting…" : `Generation: ${video.summary}`;
   const problem = [video, director].some((c) => c?.state === "problem");
   const allReady = video?.state === "ready" && director?.state === "ready";
-  return { label: `${d} · ${g}`, tone: problem ? "problem" : allReady ? "ready" : "free" };
+  return { label: `${d} · ${g}`, tone: problem ? "problem" : video?.state === "starting" ? "starting" : allReady ? "ready" : "free" };
 }
 
 /** Why approving a paid video proposal would be refused right now (mirrors the server's gate); null when allowed. */
@@ -189,8 +194,9 @@ export function approveBlock(p: { is_paid: number; est_credits: number }, st: St
   if ((b.budget_credits !== null && b.budget_credits <= 0) || (b.max_attempts !== null && b.max_attempts <= 0)) return "Paid video generation is locked: its credit or attempt limit is 0.";
   if (b.max_attempts !== null && b.attempts >= b.max_attempts) return `Paid attempt limit reached (${b.attempts}/${b.max_attempts}).`;
   if (b.budget_credits !== null && b.committed_credits + p.est_credits > b.budget_credits) return `This needs about ${p.est_credits.toFixed(0)} credits; ${b.committed_credits.toFixed(0)} of ${num(b.budget_credits)} are already committed.`;
-  const unreachable = st.generation?.problems.find((x) => /ComfyUI/.test(x));
-  if (unreachable) return `${unreachable[0].toUpperCase()}${unreachable.slice(1)}.`;
+  if (st.generation?.state === "starting") return "The local generation services are still starting.";
+  const blocker = st.generation?.problems.find((x) => /ComfyUI|proxy/.test(x));
+  if (blocker) return `${blocker[0].toUpperCase()}${blocker.slice(1)}.`;
   return null;
 }
 

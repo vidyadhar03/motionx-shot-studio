@@ -89,7 +89,7 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
           <p className="muted">Every video and image runs only when you approve its proposal, at the cost shown on it. One approval submits one generation: nothing is retried, batched or resubmitted automatically.</p>
           <dl className="facts">
             <dt>Video</dt><dd>{st.is_paid ? "Local ComfyUI → MiniMax H3 (paid partner node)" : "Fake adapter: placeholder videos, no network, no cost"} <span className="muted">· “{st.adapter}”</span></dd>
-            <dt>Status</dt><dd><span className={`cap-dot ${vc.state}`} /> {vc.state === "ready" ? "Ready (each take needs your approval)" : vc.state === "free" ? "Fake generation" : `Needs attention: ${vc.detail}`}</dd>
+            <dt>Status</dt><dd><span className={`cap-dot ${vc.state}`} /> {vc.state === "ready" ? "Ready (each take needs your approval)" : vc.state === "free" ? "Fake generation" : vc.state === "starting" ? "Starting local services…" : `Unavailable: ${vc.detail}`}</dd>
             {wf && <><dt>Image</dt><dd>{wf.title} · about {wf.est_credits_per_image} credits per image on the real route</dd></>}
             <dt>API key</dt><dd>{yes(b.key_configured)}</dd>
             <dt>Account balance</dt><dd>{balance ?? <button className="small" onClick={checkBalance}>Check balance (read-only)</button>}</dd>
@@ -100,6 +100,16 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
             {Object.entries(st.versions).map(([k, v]) => <><dt key={`k${k}`}>{k}</dt><dd key={`v${k}`}>{v}</dd></>)}
             {st.is_paid && st.comfyui_port && <><dt>ComfyUI</dt><dd><a href={`${location.protocol}//${location.hostname}:${st.comfyui_port}/`} target="_blank" rel="noreferrer">Open ComfyUI</a></dd></>}
           </dl>
+          {Object.values(st.generation?.services ?? {}).length > 0 && (
+            <div className="svc-list">
+              <h4>Local services</h4>
+              {Object.values(st.generation.services).map((s) => (
+                <div key={s.name} className="svc-row"><span className={`svc-state ${s.state}`}>{s.state === "ready" ? "Ready" : s.state === "unavailable" ? "Unavailable" : "Starting"}</span>
+                  <strong>{s.label}</strong> <span className="muted">{s.detail}{s.managed ? " · started by this app" : s.reused ? " · started elsewhere" : ""}</span>
+                  {s.action && <div className="muted">→ {s.action}</div>}</div>))}
+              <p className="muted">They keep running when the app closes, so a job in progress is never cut off. To stop them safely:
+                <code> .venv/bin/python scripts/services.py stop</code> (it refuses while a take or image is in flight).</p>
+            </div>)}
           {GENERATION.map(field)}
         </section>
 

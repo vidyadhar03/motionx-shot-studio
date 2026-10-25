@@ -119,6 +119,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(h);
   }, [busy, reload]);
 
+  // While local generation services start (or come back), re-read the status so the header moves Starting -> Ready.
+  const genState = status?.generation?.state;
+  useEffect(() => {
+    if (genState !== "starting" && genState !== "unavailable") return;
+    const h = setInterval(reloadStatus, genState === "starting" ? 2000 : 10000);
+    return () => clearInterval(h);
+  }, [genState, reloadStatus]);
+
   // -- navigation (always goes through the unsaved-changes guard) ------------------------------------------------
   const go = useCallback(async (to: { project?: string; section?: Section; item?: string | null }, opts?: { replace?: boolean }) => {
     const cur = routeRef.current;

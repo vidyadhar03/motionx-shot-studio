@@ -77,9 +77,13 @@ function SpendChip() {
           {caps.map((c) => (
             <div key={c.name} className="cap-row">
               <span className={`cap-dot ${c.state}`} aria-hidden="true" />
-              <div><strong>{c.name}</strong> <span className={`cap-state ${c.state}`}>{c.state === "free" ? "no spend" : c.state === "ready" ? "ready" : c.state === "problem" ? "needs attention" : "…"} · {c.summary}</span>
+              <div><strong>{c.name}</strong> <span className={`cap-state ${c.state}`}>{c.state === "free" ? "no spend" : c.state === "ready" ? "ready" : c.state === "starting" ? "starting" : c.state === "problem" ? "needs attention" : "…"} · {c.summary}</span>
                 <div className="muted">{c.detail}</div></div>
             </div>))}
+          {Object.values(S.status.generation?.services ?? {}).length > 0 && (
+            <div className="svc-list">{Object.values(S.status.generation.services).map((s) => (
+              <div key={s.name} className="svc-row"><span className={`svc-state ${s.state}`}>{s.state === "ready" ? "Ready" : s.state === "unavailable" ? "Unavailable" : "Starting"}</span>
+                <strong>{s.label}</strong> <span className="muted">{s.detail.split("\n")[0]}</span>{s.action && <div className="muted">→ {s.action}</div>}</div>))}</div>)}
           <button className="small" onClick={() => { setOpen(false); document.dispatchEvent(new CustomEvent("open-settings")); }}>Open Settings</button>
         </div>)}
     </div>

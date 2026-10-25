@@ -25,6 +25,31 @@ function Disclosure({ prompt, rows }: { prompt: string; rows: [string, string][]
   );
 }
 
+type Chip = { tone: "accent" | "ok" | "info" | "bad" | "warn" | "muted"; text: string };
+
+/** Current status of a video proposal, from the stored proposal and take records (never from message text). */
+export function videoStatus(p: Proposal, shot: Shot): Chip & { actionable: boolean } {
+  const take: Take | undefined = shot.takes.find((t) => t.proposal_id === p.id);
+  if (p.status === "pending") return { tone: "accent", text: "Waiting for your approval", actionable: true };
+  if (p.status === "stale") return { tone: "warn", text: "Out of date", actionable: false };
+  if (p.status === "rejected") return { tone: "muted", text: "Dismissed", actionable: false };
+  if (!take) return { tone: "ok", text: "Approved", actionable: false };
+  if (take.state === "succeeded") return { tone: "ok", text: `Completed · take ${take.number}${shot.selected_take_id === take.id ? " (selected)" : take.review === "unreviewed" ? " · to review" : ` · ${take.review}`}`, actionable: false };
+  if (["failed", "lost"].includes(take.state)) return { tone: "bad", text: `Failed · take ${take.number}`, actionable: false };
+  if (["submission_unknown", "poll_timeout", "import_failed"].includes(take.state)) return { tone: "warn", text: `${TAKE_LABEL[take.state]} · take ${take.number}`, actionable: true };
+  return { tone: "info", text: `${take.state === "queued" ? "Submitted" : TAKE_LABEL[take.state]} · take ${take.number}`, actionable: true };
+}
+
+export function imageStatus(g: AssetGen, asset: Asset | undefined): Chip & { actionable: boolean } {
+  const v = asset?.versions.find((x) => x.id === g.asset_version_id);
+  if (g.status === "pending") return { tone: "accent", text: "Waiting for your approval", actionable: true };
+  if (g.status === "rejected") return { tone: "muted", text: "Dismissed", actionable: false };
+  if (["approved", "submitting", "running"].includes(g.status)) return { tone: "info", text: "Generating", actionable: true };
+  if (v) return { tone: v.review === "chosen" ? "ok" : "accent", text: v.review === "unreviewed" ? `Completed · v${v.version} awaits your choice` : `Completed · v${v.version} ${v.review}`, actionable: v.review === "unreviewed" };
+  if (g.status === "succeeded") return { tone: "ok", text: "Completed", actionable: false };
+  return { tone: "bad", text: g.status === "submission_unknown" ? "Needs attention" : "Failed", actionable: g.status === "submission_unknown" };
+}
+
 export function VideoProposalCard({ proposal: p, shot, status, changes, onChanged, onOpenShot, onOpenTake }: {
   proposal: Proposal; shot: Shot; status: Status; changes?: string[]; onChanged: () => void; onOpenShot: () => void; onOpenTake: () => void;
 }) {
@@ -38,15 +63,7 @@ export function VideoProposalCard({ proposal: p, shot, status, changes, onChange
     ...(p.workflow_id === "h3_reference" ? refs.map((r, i) => ({ sha: r.sha256, label: `Image ${i + 1}${resolved[i] ? ` · @${resolved[i].handle}` : ""}` })) : [])];
   const paid = !!p.is_paid;
   const gate = p.status === "pending" ? approveBlock(p, status) : null;
-  let chip: { tone: "accent" | "ok" | "info" | "bad" | "warn" | "muted"; text: string };
-  if (p.status === "pending") chip = { tone: "accent", text: "Waiting for your approval" };
-  else if (p.status === "stale") chip = { tone: "warn", text: "Out of date" };
-  else if (p.status === "rejected") chip = { tone: "muted", text: "Dismissed" };
-  else if (!take) chip = { tone: "ok", text: "Approved" };
-  else if (take.state === "succeeded") chip = { tone: "ok", text: `Completed · take ${take.number}${shot.selected_take_id === take.id ? " (selected)" : take.review === "unreviewed" ? " · to review" : ` · ${take.review}`}` };
-  else if (["failed", "lost"].includes(take.state)) chip = { tone: "bad", text: `Failed · take ${take.number}` };
-  else if (["submission_unknown", "poll_timeout", "import_failed"].includes(take.state)) chip = { tone: "warn", text: `${TAKE_LABEL[take.state]} · take ${take.number}` };
-  else chip = { tone: "info", text: `${take.state === "queued" ? "Submitted" : TAKE_LABEL[take.state]} · take ${take.number}` };
+  const chip = videoStatus(p, shot);
 
   const approve = async () => {
     const ok = await confirm(paid ? `Approve and spend about ${p.est_credits.toFixed(0)} credits?` : "Approve and generate (fake adapter)?",
@@ -95,13 +112,7 @@ export function ImageProposalCard({ gen: g, asset, onChanged, onOpenAsset }: { g
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const v = asset?.versions.find((x) => x.id === g.asset_version_id);
-  let chip: { tone: "accent" | "ok" | "info" | "bad" | "warn" | "muted"; text: string };
-  if (g.status === "pending") chip = { tone: "accent", text: "Waiting for your approval" };
-  else if (g.status === "rejected") chip = { tone: "muted", text: "Dismissed" };
-  else if (["approved", "submitting", "running"].includes(g.status)) chip = { tone: "info", text: "Generating" };
-  else if (v) chip = { tone: v.review === "chosen" ? "ok" : "accent", text: v.review === "unreviewed" ? `Completed · v${v.version} awaits your choice` : `Completed · v${v.version} ${v.review}` };
-  else if (g.status === "succeeded") chip = { tone: "ok", text: "Completed" };
-  else chip = { tone: "bad", text: g.status === "submission_unknown" ? "Needs attention" : "Failed" };
+  const chip = imageStatus(g, asset);
   const approve = async () => {
     const ok = await confirm(g.is_paid ? `Approve and spend about ${g.est_credits} credits?` : "Approve and generate (fake)?",
       g.is_paid ? <p>This submits <strong>one</strong> image generation of this exact proposal (≈ {g.est_credits} credits). It is not retried automatically, and you choose afterwards whether to use the result.</p> : <p>Placeholder image, no cost.</p>,

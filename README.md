@@ -35,7 +35,26 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e ".[de
 ./scripts/run_app.sh            # http://127.0.0.1:8700
 ```
 
-That's the only command you need day to day. It always opens **your workspace**: one database plus its media, in a per-user folder that doesn't depend on where you run the command from, and survives restarts, reinstalls and UI rebuilds.
+That's the only command you need day to day. With `STUDIO_ADAPTER=comfy_local` it also brings up the local generation stack in the background:
+
+- **Reuses** a healthy ComfyUI (:8188) and comfy-api-proxy (:8189) if they're already running, and never restarts them (one may be running a paid job).
+- **Starts** whichever is missing, from the pinned install in `./runtime` (ComfyUI v0.42.1) and the app's venv (the proxy, with its state kept in `runtime/proxy-state`). Logs: `runtime/comfyui.log`, `runtime/proxy.log`.
+- **Waits** with bounded timeouts (ComfyUI 180 s, proxy 45 s). The header shows *Generation starting…*, then *requires approval* when both answer, or *Generation: …* with the actual blocker.
+- **Reports, doesn't fight:** a port held by another program is named in the error and left alone. A missing install shows the exact setup command (`./scripts/setup_comfy.sh`); nothing is downloaded or reinstalled automatically.
+- **Stays usable:** while services start, or if they can't, the app, your media and the director chat keep working. Approving a generation is refused (with the reason) until both services answer, so nothing is reserved or submitted to fail.
+- **Never generates:** startup and health checks are read-only. They submit no workflow and make no model call.
+- **Fake mode** (`STUDIO_ADAPTER=fake`) starts nothing. `STUDIO_MANAGE_SERVICES=0` turns the automatic start off (the app then only reports what it finds).
+
+**Stopping the local services.** They keep running when you close the app, so a job in progress is never cut off. To stop them:
+
+```bash
+.venv/bin/python scripts/services.py status   # what is running, who started it, any work in flight
+.venv/bin/python scripts/services.py stop     # stops only what the app started; refuses while a take or image is in flight
+```
+
+`stop --force` overrides the in-flight check (you may lose that job's output). Services you started yourself are never stopped by this command; stop them where you started them.
+
+It always opens **your workspace**: one database plus its media, in a per-user folder that doesn't depend on where you run the command from, and survives restarts, reinstalls and UI rebuilds.
 
 | OS | Workspace |
 |---|---|
@@ -64,7 +83,7 @@ That's the only command you need day to day. It always opens **your workspace**:
 
 ```bash
 ./scripts/setup_comfy.sh                      # ComfyUI v0.42.1 into ./runtime (gitignored)
-./scripts/run_comfy.sh                        # ComfyUI :8188 + comfy-api-proxy :8189
+./scripts/run_comfy.sh                        # optional: start/reuse ComfyUI :8188 + proxy :8189 alone (run_app.sh does this too)
 .venv/bin/python scripts/comfy_check.py graphs # offline: ComfyUI validates the real graphs, runs nothing
 cp .env.example .env                          # set COMFY_API_KEY and STUDIO_ADAPTER=comfy_local
 .venv/bin/python scripts/comfy_check.py balance

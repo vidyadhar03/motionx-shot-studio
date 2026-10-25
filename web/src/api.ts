@@ -53,8 +53,12 @@ export type Status = {
   workspace: Workspace;
   budget: { budget_credits: number | null; committed_credits: number; remaining_credits: number | null; attempts: number;
             max_attempts: number | null; key_configured: boolean; is_paid: boolean };
-  generation: { mode: "fake" | "paid"; ready: boolean; problems: string[]; approval: string };
+  generation: { mode: "fake" | "paid"; state: "starting" | "ready" | "unavailable"; ready: boolean; problems: string[]; approval: string;
+                services: Record<string, ServiceInfo> };
 };
+
+export type ServiceInfo = { name: string; label: string; state: "unknown" | "checking" | "starting" | "ready" | "unavailable"; detail: string;
+  action: string | null; managed: boolean; reused: boolean; pid: number | null; log: string | null };
 
 export type Presets = { presets: Record<string, string[]>; labels: Record<string, Record<string, string>>;
                         descriptions: Record<string, Record<string, string>>;

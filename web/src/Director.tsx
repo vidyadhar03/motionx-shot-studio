@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentCall, AgentThread, api, Asset, AssetGen, Shot, ThreadView } from "./api";
-import { orderedShots, threadSendState } from "./derive";
+import { orderedShots, shotStatus, threadSendState } from "./derive";
 import Markdown from "./Markdown";
-import { ImageProposalCard, VideoProposalCard } from "./ProposalCards";
+import { ImageProposalCard, imageStatus, VideoProposalCard, videoStatus } from "./ProposalCards";
 import { useStudio } from "./store";
 import { fmtDate, fmtDateTime, Menu, MenuItem, Pill } from "./ui";
 
@@ -30,6 +30,7 @@ export default function Director({ onClose }: { onClose: () => void }) {
   const logRef = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   const sendId = useRef<string | null>(null);
+  const sessionStart = useRef(new Date().toISOString());              // messages older than this page load are history
 
   const setText = useCallback((v: string) => { setTextState(v); S.drafts.current.set(pid, v); }, [pid, S.drafts]);
   useEffect(() => {                                                  // another project: its own threads and its own unsent draft
@@ -129,7 +130,8 @@ export default function Director({ onClose }: { onClose: () => void }) {
 
   const inline = new Set(blocks.flatMap((b) => (b.proposal ? [String(b.proposal.call.result!.content.proposal_id ?? "")] : [])));
   const focusShot = focusId ? live.shots.get(focusId) : undefined;
-  const pinned = focusShot?.proposals.find((p) => (p.status === "pending" || p.status === "stale") && !inline.has(p.id));
+  const pinned = focusShot?.proposals.find((p) => p.status === "pending" && !inline.has(p.id));
+  const history = focusShot ? focusShot.proposals.filter((p) => p.status !== "pending") : [];
   const changed = () => { S.reload(); S.reloadStatus(); };
   const lastAt = view?.messages.reduce((m, x) => (x.at > m ? x.at : m), thread?.created_at ?? "") ?? "";
   const earlier = !!thread && threads[0]?.id !== thread.id;
@@ -151,15 +153,20 @@ export default function Director({ onClose }: { onClose: () => void }) {
         <button className="icon-btn" aria-label="Hide director" title="Hide director" onClick={onClose}>✕</button>
       </header>
 
+      {focus && <ShotState row={focus} />}
+
       <div className="dir-log" ref={logRef} tabIndex={0} aria-label="Conversation">
         {!loaded && <p className="muted">Loading…</p>}
         {earlier && <div className="dir-earlier">Earlier conversation · {fmtDate(lastAt)}. It may describe things that have since changed.</div>}
-        {loaded && !blocks.length && <p className="muted dir-hint">{focus ? `Tell me what to change in ${focusLabel}, or ask me to apply its feedback. I'll prepare a proposal for you to approve.` : "Ask me to draft a film plan, prepare assets, or revise a shot. I can prepare proposals, but only you can approve them."}</p>}
-        {blocks.map((b) => b.msg ? <Message key={b.key} m={b.msg} />
+        {loaded && !blocks.length && !(focus?.selected_take_id && focus.locked) && <p className="muted dir-hint">{focus ? `Tell me what to change in ${focusLabel}, or ask me to apply its feedback. I'll prepare a proposal for you to approve.` : "Ask me to draft a film plan, prepare assets, or revise a shot. I can prepare proposals, but only you can approve them."}</p>}
+        {blocks.map((b) => b.msg ? <Message key={b.key} m={b.msg} historical={b.msg.at < sessionStart.current} />
           : b.proposal ? <ProposalFor key={b.key} call={b.proposal.call} changes={b.proposal.changes} live={live} S={S} onChanged={changed} />
           : <Actions key={b.key} calls={b.calls!} />)}
+        {history.length > 0 && focusShot && S.status && (
+          <details className="pc-history"><summary>Earlier proposals for this shot ({history.length})</summary>
+            {history.map((p) => <CompactVideo key={p.id} p={p} shot={focusShot} S={S} onChanged={changed} />)}</details>)}
         {pinned && focusShot && config && S.status && (
-          <div className="pinned"><div className="pin-label">{pinned.status === "pending" ? "Waiting for your approval on this shot" : "An earlier proposal on this shot is out of date"}</div>
+          <div className="pinned"><div className="pin-label">Waiting for your approval on this shot</div>
             <VideoProposalCard proposal={pinned} shot={focusShot} status={S.status} onChanged={changed} onOpenShot={() => S.go({ section: "shots", item: focusShot.id })} onOpenTake={() => S.go({ section: "shots", item: focusShot.id })} /></div>)}
         {busy && <div className="working" role="status"><i className="spin" /> The director is working…<button className="small" onClick={stop}>Stop</button></div>}
       </div>
@@ -188,19 +195,47 @@ function ProposalFor({ call, changes, live, S, onChanged }: { call: AgentCall; c
   if (content.asset_generation_id) {
     const g = live.gens.find((x) => x.id === content.asset_generation_id);
     if (!g) return <div className="pcard"><div className="pc-head"><span className="pc-kind">Image</span><span>@{String(content.asset)}</span><Pill>status unknown</Pill></div></div>;
-    return <ImageProposalCard gen={g} asset={live.assets.find((a) => a.handle === g.handle)} onChanged={onChanged} onOpenAsset={() => S.go({ section: "assets", item: g.handle })} />;
+    const asset = live.assets.find((a) => a.handle === g.handle);
+    const st = imageStatus(g, asset);
+    const card = <ImageProposalCard gen={g} asset={asset} onChanged={onChanged} onOpenAsset={() => S.go({ section: "assets", item: g.handle })} />;
+    return st.actionable ? card : <details className="pc-compact"><summary><span className="pc-kind">Image</span> @{g.handle} <Pill tone={st.tone}>{st.text}</Pill></summary>{card}</details>;
   }
   const shot = live.shots.get(String(call.input.shot_id));
   const p = shot?.proposals.find((x) => x.id === content.proposal_id);
   if (!shot || !p || !S.status) return <div className="pcard"><div className="pc-head"><span className="pc-kind">Video</span><span>{String(content.proposal_id)}</span><Pill>status unknown</Pill></div></div>;
+  if (!videoStatus(p, shot).actionable) return <CompactVideo p={p} shot={shot} S={S} onChanged={onChanged} changes={changes} />;
   return <VideoProposalCard proposal={p} shot={shot} status={S.status} changes={changes} onChanged={onChanged}
                             onOpenShot={() => S.go({ section: "shots", item: shot.id })} onOpenTake={() => S.go({ section: "shots", item: shot.id })} />;
 }
 
-function Message({ m }: { m: ThreadView["messages"][number] }) {
-  if (m.kind === "user") return <div className="msg user">{m.content.text}</div>;
+const LONG = 600;
+/** Messages are shown exactly as stored. A long response from an earlier session starts folded to its opening lines
+ *  (the original text, cut, never rewritten or re-summarised); one click shows all of it. */
+function Message({ m, historical }: { m: ThreadView["messages"][number]; historical: boolean }) {
+  const [open, setOpen] = useState(false);
   if (m.kind === "notice") return <div className={`msg notice ${m.content.level}`}>{m.content.text}</div>;
-  return <div className="msg assistant"><Markdown text={m.content.text} /></div>;
+  const text = m.content.text ?? "";
+  const user = m.kind === "user";
+  const body = (t: string) => (user ? t : <Markdown text={t} />);
+  if (!historical || text.length <= LONG || open) {
+    return <div className={`msg ${user ? "user" : "assistant"}`}>{body(text)}
+      {historical && text.length > LONG && <button className="link fold-btn" onClick={() => setOpen(false)}>Fold earlier {user ? "message" : "response"}</button>}</div>;
+  }
+  const first = text.split(/\n\s*\n/)[0];
+  const excerpt = first.length > 240 ? `${first.slice(0, 240).replace(/\s+\S*$/, "")}…` : `${first}…`;
+  return <div className={`msg ${user ? "user" : "assistant"} folded`}>{body(excerpt)}
+    <button className="link fold-btn" onClick={() => setOpen(true)}>Show earlier {user ? "message" : "response"}</button></div>;
+}
+
+/** A proposal that is no longer actionable (out of date, dismissed, completed): one line, expandable to the full card. */
+function CompactVideo({ p, shot, S, onChanged, changes }: { p: Shot["proposals"][number]; shot: Shot; S: ReturnType<typeof useStudio>; onChanged: () => void; changes?: string[] }) {
+  const st = videoStatus(p, shot);
+  return (
+    <details className="pc-compact"><summary><span className="pc-kind">Video</span> {shot.title || "Untitled shot"} <Pill tone={st.tone}>{st.text}</Pill>
+      <span className="muted">{fmtDate(p.created_at)}{p.created_by === "agent" ? " · director" : ""}</span></summary>
+      <VideoProposalCard proposal={p} shot={shot} status={S.status!} changes={changes} onChanged={onChanged}
+                         onOpenShot={() => S.go({ section: "shots", item: shot.id })} onOpenTake={() => S.go({ section: "shots", item: shot.id })} /></details>
+  );
 }
 
 function Actions({ calls }: { calls: AgentCall[] }) {
@@ -236,4 +271,22 @@ function fmt(v: unknown): string {
   if (v === null || v === undefined || v === "") return "—";
   const s = typeof v === "string" ? v : JSON.stringify(v);
   return s.length > 60 ? s.slice(0, 60) + "…" : s;
+}
+
+/** What is true about the open shot right now, from its stored records. Old messages never decide this. */
+function ShotState({ row }: { row: import("./api").OverviewShot }) {
+  const sel = row.takes.find((t) => t.id === row.selected_take_id);
+  let text: string;
+  if (sel && row.locked) text = `Take ${sel.number} is selected for the film and the shot is locked, so the director won't change it. Unlock it beside the shot title if you want to revise it.`;
+  else if (sel) text = `Take ${sel.number} is selected for the film. Ask for changes if you want another version.`;
+  else {
+    const st = shotStatus(row);
+    text = st.key === "review" ? `${st.label}. Watch it beside the chat, then approve it or give feedback.`
+      : st.key === "proposal" ? "A proposal is waiting for your approval below."
+      : st.key === "working" ? `${st.label}.` : st.key === "blocked" ? `Video is blocked: ${row.blockers[0]}.`
+      : st.key === "stale" ? "The last proposal is out of date. Ask for a new one, or prepare it yourself."
+      : st.key === "empty" ? "No takes yet. Describe what you want and the director will prepare a proposal." : `${st.label}.`;
+    if (row.locked) text += " The shot is locked from the director.";
+  }
+  return <div className={`dir-state ${sel ? "done" : ""}`} role="status">{sel && <span className="ds-check" aria-hidden="true">✓</span>}{row.locked && <span aria-hidden="true">🔒</span>}<span>{text}</span></div>;
 }

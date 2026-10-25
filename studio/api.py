@@ -29,6 +29,7 @@ from .agent.providers.base import ProviderConfigError
 from .agent.store import AgentStore
 from .assetgen import AssetGenerations
 from .overview import project_overview
+from .services import LocalServices, ready_now
 from .planning import Planning
 
 log = logging.getLogger("studio")
@@ -151,7 +152,7 @@ class RestrictIn(BaseModel):
 
 def create_app(settings: Settings | None = None, *, adapter: Adapter | None = None,
                balance_fn: Callable[[str | None], float | None] = fetch_balance_credits,
-               start_worker: bool = True) -> FastAPI:
+               start_worker: bool = True, services: LocalServices | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     from .workspace import ensure_marker
     marker = ensure_marker(settings.data_dir, settings.workspace_kind)
@@ -165,6 +166,8 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     limits = Limits(db, settings)
     assetgen = AssetGenerations(db, ops, media, adapter, settings, balance_fn=balance_fn)
     image_tasks: set = set()
+    # comfy_local only: find/reuse/start ComfyUI + proxy in the background (fake mode never starts anything)
+    services = services or LocalServices(settings, enabled=(adapter.name == "comfy_local") and start_worker)
 
     def schedule_image(gid: str) -> None:
         import asyncio
@@ -177,6 +180,7 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
         import asyncio
         dispatcher = Dispatcher(service, max_running=settings.max_running)
         app.state.dispatcher = dispatcher
+        services.start_background()
         if start_worker:
             await dispatcher.start(settings.sweep_interval_s)
             for gid in await asyncio.to_thread(assetgen.recover):
@@ -187,6 +191,7 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     app = FastAPI(title="MotionX Shot Studio", lifespan=lifespan)
     app.state.settings, app.state.service, app.state.ops, app.state.media = settings, service, ops, media
     app.state.agent = agent
+    app.state.services = services
     app.state.planning, app.state.assetgen, app.state.image_tasks = planning, assetgen, image_tasks
 
     def err(status: int, e: Exception) -> JSONResponse:
@@ -239,21 +244,41 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     # -- readiness (what can happen, and what is wrong) -------------------------------------------
     def generation_state(b: dict, versions: dict) -> dict:
         """Paid generation is always approved one concrete proposal at a time by a person. This reports whether the
-        app is able to run an approved one, and why not."""
+        app is able to run an approved one (starting | ready | unavailable), and the actual blocker."""
         if not adapter.is_paid:
-            return {"mode": "fake", "ready": True, "problems": [], "approval": "each proposal"}
+            return {"mode": "fake", "state": "ready", "ready": True, "problems": [], "approval": "each proposal", "services": {}}
+        services.recheck()
+        snap = services.snapshot()
         problems: list[str] = []
+        state = "ready"
+        if snap["state"] == "starting":
+            state = "starting"
+        elif snap["state"] == "unavailable":
+            bad = next(v for v in snap["services"].values() if v["state"] == "unavailable")
+            problems.append(f"{bad['label']} unavailable: {bad['detail'].splitlines()[0]}")
+        elif snap["state"] == "not_needed" and versions.get("comfyui") == "unknown":
+            problems.append(f"ComfyUI isn't reachable at {settings.comfyui_url}")
         if not b["key_configured"]:
             problems.append("COMFY_API_KEY is not configured")
-        if versions.get("comfyui") == "unknown":
-            problems.append(f"ComfyUI isn't reachable at {settings.comfyui_url}")
         if (b["budget_credits"] is not None and b["budget_credits"] <= 0) or (b["max_attempts"] is not None and b["max_attempts"] <= 0):
             problems.append("the video credit or attempt limit is set to 0")
         elif b["budget_credits"] is not None and b["remaining_credits"] is not None and b["remaining_credits"] <= 0:
             problems.append("the overall video credit limit is used up")
         elif b["max_attempts"] is not None and b["attempts"] >= b["max_attempts"]:
             problems.append("the overall video attempt limit is used up")
-        return {"mode": "paid", "ready": not problems, "problems": problems, "approval": "each proposal"}
+        if problems:
+            state = "unavailable"
+        return {"mode": "paid", "state": state, "ready": state == "ready", "problems": problems,
+                "approval": "each proposal", "services": snap["services"]}
+
+    def require_local_services() -> None:
+        """Approving on the local route needs ComfyUI and the proxy answering now; otherwise refuse before any take,
+        reservation or submission exists (nothing is queued to fail later)."""
+        if adapter.name != "comfy_local":
+            return
+        why = ready_now(settings)
+        if why:
+            raise ConflictError(f"generation services aren't ready: {why}. Nothing was submitted or reserved.")
 
     # -- status -----------------------------------------------------------------------------
     @app.get("/api/status")
@@ -373,6 +398,7 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     async def approve_asset_generation(gid: str) -> dict:
         # HUMAN-ONLY: the only caller of AssetGenerations.approve(). No agent tool wraps it.
         import asyncio
+        await asyncio.to_thread(require_local_services)
         g = await asyncio.to_thread(assetgen.approve, gid, "user")
         schedule_image(gid)
         return g
@@ -566,6 +592,7 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     async def approve(pid: str) -> JSONResponse:
         # HUMAN-ONLY: this route is the only caller of service.approve(). Agent tools (M3) must not wrap it.
         import asyncio
+        await asyncio.to_thread(require_local_services)
         take, created = await asyncio.to_thread(service.approve, pid, "user")
         if created:
             app.state.dispatcher.schedule(take["id"])
@@ -638,6 +665,7 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
 def run() -> None:
     import uvicorn
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)        # health probes are frequent; keep the log readable
     s = Settings.from_env()
     if s.workspace_source != "default":
         log.warning("ISOLATED workspace (STUDIO_DATA_DIR override): %s. Your canonical workspace is not open.", s.data_dir)

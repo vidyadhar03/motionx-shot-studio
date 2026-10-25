@@ -344,3 +344,20 @@ label .lbl { display: block; }
 .ss-thumb { width: 28px; height: 28px; border-radius: 5px; object-fit: cover; margin-left: 4px; border: 1px solid var(--line2); }
 .limit-row { margin: 10px 0; } .limit-input { flex-direction: row; display: flex; align-items: center; gap: 8px; } .limit-input input { max-width: 160px; }
 .limit-save { display: flex; align-items: center; gap: 8px; position: sticky; bottom: -16px; background: var(--panel); padding: 10px 0; border-top: 1px solid var(--line); margin-bottom: 14px; }
+
+/* chat cleanup + service readiness */
+.dir-state { display: flex; gap: 8px; align-items: flex-start; padding: 8px 14px; font-size: 12.5px; color: #c3c6cd; border-bottom: 1px solid var(--line); background: var(--panel2); }
+.dir-state.done { color: #a9dfc0; } .ds-check { color: var(--ok); font-weight: 700; }
+.msg.folded { color: #c3c6cd; } .fold-btn { display: block; margin-top: 6px; font-size: 12px; padding: 0; }
+.pc-compact { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.pc-compact > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 7px 10px; font-size: 12.5px; flex-wrap: wrap; list-style: none; }
+.pc-compact > summary::-webkit-details-marker { display: none; } .pc-compact > summary::before { content: "▸"; color: var(--muted); font-size: 10px; } .pc-compact[open] > summary::before { content: "▾"; }
+.pc-compact > .pcard { border: none; border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; }
+.pc-history { border-top: 1px dashed var(--line2); padding-top: 6px; } .pc-history > summary { cursor: pointer; font-size: 12px; color: var(--muted); padding: 4px 0; }
+.pc-history .pc-compact { margin-top: 6px; }
+.spend-chip.starting .status-dot { background: var(--info); animation: pulse 1.2s ease-in-out infinite; } .spend-chip.starting { color: #9cc3ff; }
+@keyframes pulse { 50% { opacity: .35; } }
+.svc-list { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; } .svc-row { font-size: 12.5px; }
+.svc-state { display: inline-block; min-width: 76px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.svc-state.ready { color: var(--ok); } .svc-state.unavailable { color: var(--warn); } .svc-state.starting, .svc-state.checking, .svc-state.unknown { color: var(--info); }
+.cap-dot.starting { background: var(--info); } .cap-state.starting { color: var(--info); }

@@ -3,6 +3,7 @@ Paid generation is enabled but still needs a person's approval of each concrete 
 Gemini client, fake generation."""
 from __future__ import annotations
 
+import json
 import threading
 from types import SimpleNamespace
 
@@ -136,7 +137,8 @@ def test_api_limits_status_and_agent_config(tmp_path):
         assert r.status_code == 409 and "environment" in r.json()["detail"]
         assert c.put("/api/limits", json={"limits": {"video_attempt_cap": 1}}).status_code == 409
         gen = c.get("/api/status").json()["generation"]
-        assert gen == {"mode": "paid", "ready": True, "problems": [], "approval": "each proposal"}
+        assert (gen["mode"], gen["state"], gen["ready"], gen["problems"]) == ("paid", "ready", True, [])
+        assert gen["services"] == {}                          # a paid FAKE adapter isn't comfy_local: nothing is started
         assert c.get("/api/limits").json()["director_usd_cap"]["value"] == 3.0
 
 
@@ -154,3 +156,15 @@ def test_api_reports_generation_problems_and_reload_sends_nothing(tmp_path):
         b = c.post(f"/api/agent/threads/{tid}/messages", json={"text": "hello", "client_id": "k1"}).json()
         assert b["report"]["stop"] == "duplicate"
         assert len([m for m in b["messages"] if m["kind"] == "user"]) == 1
+
+
+def test_director_instructions_ask_for_concise_plain_replies_and_honest_attribution(world: World):
+    shot = world.shot()
+    mock = MockGeminiClient(gemini_script(shot["id"]))
+    ag = gem(world, mock)
+    tid = ag.create_thread(shot["project_id"])["id"]
+    ag.send(tid, "tighten it")
+    sent = json.dumps(mock.calls[0])
+    for rule in ("Plain filmmaking language", "Don't put raw ids", "compiled prompts", "you do not watch",
+                 "fuller explanation only when they ask"):
+        assert rule in sent, rule

@@ -130,3 +130,17 @@ test("a conversation keeps its own provider; limits are per message and per conv
   assert.equal(threadSendState({ provider: "scripted", model: "x" }, cfg({ live: false })).kind, "offline");
   assert.match(newConversationLabel(cfg()), /gemini gemini-3.8-flash \(live\)/);
 });
+
+test("local services: starting, ready and unavailable read differently and gate approval", () => {
+  const svc = (state: string, detail: string) => ({ comfyui: { name: "comfyui", label: "ComfyUI", state, detail, action: null, managed: true, reused: false, pid: 1, log: null } });
+  const starting = status({}, true, { mode: "paid", state: "starting", ready: false, problems: [], services: svc("starting", "starting ComfyUI at http://127.0.0.1:8188") });
+  assert.equal(videoCap(starting).state, "starting");
+  assert.equal(spendSummary([videoCap(starting), imageCap(null), agentCap(cfg())]).label, "Director ready · Generation starting…");
+  assert.equal(spendSummary([videoCap(starting), imageCap(null), agentCap(cfg())]).tone, "starting");
+  assert.match(approveBlock({ is_paid: 1, est_credits: 135 }, starting)!, /still starting/);
+  const down = status({}, true, { mode: "paid", state: "unavailable", ready: false, problems: ["ComfyUI unavailable: ComfyUI isn't installed: runtime/ComfyUI has no ComfyUI checkout"], services: svc("unavailable", "x") });
+  assert.equal(spendSummary([videoCap(down), imageCap(null), agentCap(cfg())]).label, "Director ready · Generation: ComfyUI unavailable");
+  assert.match(approveBlock({ is_paid: 1, est_credits: 135 }, down)!, /ComfyUI unavailable/);
+  const ok = status({}, true, { mode: "paid", state: "ready", ready: true, problems: [], services: svc("ready", "ok") });
+  assert.equal(spendSummary([videoCap(ok), imageCap(null), agentCap(cfg())]).label, "Director ready · Generation requires approval");
+});
