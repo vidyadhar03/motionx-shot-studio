@@ -106,15 +106,26 @@ export type Accounting = {
   calculated_total_usd: number; confirmed_total_usd: number; confirmed: unknown[]; status: string;
 };
 
-export type PlanShot = { key: string; title: string; intention?: string; action?: string; framing?: string | null;
+export type Beat = { key: string; text: string; adds: string; origin: "from_you" | "from_source" | "added"; source_lines?: string };
+export type Story = { premise: string; explores: string; audience: string; development?: string; beats: Beat[]; ending: string; ending_why: string;
+  duration_target_s?: number; form?: string; source: { kind: "idea" } | { kind: "script"; source_id: string; relation: "as_written" | "adapted" };
+  script_text?: string; changes_from_source?: string[]; self_check?: { repetition?: string; assumptions?: string; ending?: string } };
+export type StorySource = { id: string; project_id: string; kind: string; title: string; text: string; sha256: string; created_by: string; created_at: string; chars: number; lines?: number };
+export type StoryReview = { needed: boolean; state: "none" | "review_needed" | "revision_needed" | "keep" | "revised"; story_revision?: number;
+  affected: { shot_id: string; key: string; title: string; beats: string[]; basis_revision: number | null; beat_changes: { beat: string; change: string; was: string; now?: string }[] }[];
+  new_beats?: string[]; last_review?: { decision: string; note: string; at: string } | null };
+export type PlanShot = { key: string; title: string; beats?: string[]; serves?: string; intention?: string; action?: string; framing?: string | null;
   end_framing?: string | null; camera_move?: string | null; camera_detail?: string; lighting?: string | null;
   lens_look?: string | null; depth_of_field?: string | null; lighting_detail?: string; duration_s: number; audio?: string;
   aspect_ratio?: string; assets: string[] };
 export type PlanAsset = { handle: string; kind: string; name: string; description: string; source: string;
   required: boolean; image_prompt: string };
 export type PlanContent = { title: string; logline: string; treatment: string; observed: string[];
-  creative_additions: string[]; guardrails: string[]; open_questions?: string[]; scene: { name: string }; shots: PlanShot[]; assets: PlanAsset[] };
+  creative_additions: string[]; guardrails: string[]; open_questions?: string[]; scene: { name?: string }; shots: PlanShot[]; assets: PlanAsset[];
+  story?: Story; story_basis?: { story_revision: number; story_hash: string } };
 export type Plan = { id: string; project_id: string; revision: number; approved_revision: number | null;
+  story_status: "none" | "draft" | "approved" | "changed"; story_approved_revision: number | null; story_approved_at: string | null;
+  story_hash: string | null; story_review: StoryReview;
   approved_at: string | null; status: "draft" | "approved" | "changed_since_approval"; content: PlanContent;
   warnings: Record<string, { code: string; message: string }[]>;
   links: { kind: string; item_key: string; target_id: string; plan_revision: number }[];
@@ -200,6 +211,12 @@ export const api = {
     call<{ plan: Plan; report: Record<string, any> }>("POST", `/api/plans/${planId}/approve`, { expected_revision }),
   overview: (pid: string) => call<Overview>("GET", `/api/projects/${pid}/overview`),
   planRevision: (planId: string, revision: number) => call<PlanRevisionDoc>("GET", `/api/plans/${planId}/revisions/${revision}`),
+  approveStory: (planId: string, expected_revision: number) => call<Plan>("POST", `/api/plans/${planId}/approve-story`, { expected_revision }),
+  storyReview: (planId: string, story_revision: number, decision: string, note: string) =>
+    call<Plan>("POST", `/api/plans/${planId}/story-review`, { story_revision, decision, note }),
+  addSource: (pid: string, title: string, text: string) => call<StorySource>("POST", `/api/projects/${pid}/story-sources`, { title, text }),
+  sources: (pid: string) => call<StorySource[]>("GET", `/api/projects/${pid}/story-sources`),
+  source: (sid: string) => call<StorySource>("GET", `/api/story-sources/${sid}`),
   planDiff: (planId: string, a: number, b: number) => call<Record<string, any>>("GET", `/api/plans/${planId}/diff?a=${a}&b=${b}`),
   preparation: (pid: string) => call<Preparation>("GET", `/api/projects/${pid}/preparation`),
   imageWorkflow: () => call<ImageWorkflow>("GET", "/api/image-workflow"),

@@ -271,6 +271,10 @@ CREATE TABLE IF NOT EXISTS plans (
   approved_revision INTEGER,                      -- approved iff approved_revision = revision
   approved_at TEXT,
   approved_by TEXT,
+  story_approved_revision INTEGER,                -- the revision whose STORY a person approved (creates nothing)
+  story_approved_at TEXT,
+  story_approved_by TEXT,
+  story_hash TEXT,                                -- sha256 of that approved story section
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -375,6 +379,38 @@ CREATE TABLE IF NOT EXISTS workspace_imports (
   at TEXT NOT NULL
 );
 
+-- Supplied scripts, stored verbatim by the person (paste box, or a copied chat message). Never edited or deleted;
+-- an adaptation is a separate story revision that links here.
+CREATE TABLE IF NOT EXISTS story_sources (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  kind TEXT NOT NULL CHECK (kind IN ('pasted','message')),
+  title TEXT NOT NULL,
+  text TEXT NOT NULL,
+  sha256 TEXT NOT NULL,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS story_sources_immutable BEFORE UPDATE ON story_sources
+BEGIN SELECT RAISE(ABORT, 'story sources are immutable; store a new source'); END;
+CREATE TRIGGER IF NOT EXISTS story_sources_kept BEFORE DELETE ON story_sources
+BEGIN SELECT RAISE(ABORT, 'story sources are kept'); END;
+
+-- Explicit reviews of existing shots after the approved story changed (append-only).
+CREATE TABLE IF NOT EXISTS story_reviews (
+  id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL REFERENCES plans(id),
+  story_revision INTEGER NOT NULL,
+  story_hash TEXT NOT NULL,
+  decision TEXT NOT NULL CHECK (decision IN ('keep','needs_revision','revised')),
+  note TEXT NOT NULL DEFAULT '',
+  affected TEXT NOT NULL DEFAULT '[]',            -- JSON: shot ids shown to the person at the time
+  by TEXT NOT NULL,
+  at TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS story_reviews_immutable BEFORE UPDATE ON story_reviews
+BEGIN SELECT RAISE(ABORT, 'story reviews are append-only'); END;
+
 -- Limits a person sets in the app's Settings (see studio/limits.py). Per workspace; never imported by consolidation.
 CREATE TABLE IF NOT EXISTS workspace_settings (
   key TEXT PRIMARY KEY,
@@ -435,6 +471,8 @@ class Database:
         "proposals": [("context", "TEXT"), ("context_hash", "TEXT"), ("stale_reason", "TEXT")],
         "agent_usage": [("thought_tokens", "INTEGER NOT NULL DEFAULT 0"), ("pre_estimate_usd", "REAL"),
                         ("raw_usage", "TEXT"), ("calc_method", "TEXT")],
+        "plans": [("story_approved_revision", "INTEGER"), ("story_approved_at", "TEXT"), ("story_approved_by", "TEXT"),
+                  ("story_hash", "TEXT")],
     }
 
     def _migrate(self, conn: sqlite3.Connection) -> None:

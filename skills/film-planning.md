@@ -1,11 +1,16 @@
-# Film planning: from an idea to a reviewable plan and its assets
+# Film planning: from an approved story to a shot plan and its assets
 
-Read this before you draft or revise `/plan`, or propose an asset image. It works for any brief. A
-person approves the plan, every generation and every generated image; you only propose.
+Read this before you plan shots in `/plan`, or propose an asset image. It works for any brief. A person approves the
+story, the shot plan, every generation and every generated image; you only propose.
 
 ## 1. Read first
 `read /` (full brief), `read /decisions`, `list /assets`, `read /plan` (it may already exist; then
 you revise it with `expected_revision`). Load `/skills/shot-direction` for the shot fields.
+
+**Story first.** For a new film, develop the story with `/skills/story-development` and wait for the person to
+approve it before you add shots. `read /plan` shows `story_status`: plan shots only when it is `approved`. If the
+person asks to skip the story and go straight to shots, do so (a plan without a story is allowed). Existing plans
+without a story keep working as they are.
 
 ## 2. Separate what was observed from what you add
 - `observed`: only what the person says they saw or experienced, in their terms. Never embellish.
@@ -23,8 +28,13 @@ you revise it with `expected_revision`). Load `/skills/shot-direction` for the s
 If the brief is ambiguous about something a shot depends on, ask instead of guessing.
 
 ## 3. Treatment and shots
-- `treatment`: 60–150 words, present tense, what the audience sees and hears. `logline`: one line.
-- About **three** shots (1–6 allowed). Open on space before faces; one idea per shot.
+- `treatment`: present tense, what the audience sees and hears; optional when there is an approved story.
+  `logline`: one line.
+- Shots (1–6) come from the approved story, not from a template. Each shot lists the story `beats` it serves and says
+  how in `serves`. One beat may need several shots; one shot may serve several beats; every beat should be served.
+  Covering the same action at several camera distances is coverage, not progression: use it only when the
+  repetition itself is the point, and say why in `serves`. Don't change the approved story while planning shots; if
+  the shots show the story needs changing, say so and let the person revise and approve it.
 - Each shot: `key` (s1, s2…), `title`, `intention` (why the shot exists), `action` (concrete, visible,
   in order; timed beats like `2-4s:` must fit the duration), `framing` (+ `end_framing` only when the
   size changes), `camera_move` (+ `camera_detail` for pace), `lighting`, `duration_s` (4–8 is usual;
@@ -58,8 +68,8 @@ and `image_prompt`.
   images in one style.
 
 ## 5. After you write the plan
-Say what is observed vs added, list the shots and assets, point out any warnings, and say the plan
-waits for the person's approval. You cannot approve it.
+Say in a few plain sentences how the shots carry the story, what you added, anything that needs the person's
+attention, and that the shot plan waits for their approval. You cannot approve it.
 
 ## 6. Preparing assets (only after the plan is approved, and when asked)
 `read /preparation`. For a missing asset whose source is `generate` or `either`, you may

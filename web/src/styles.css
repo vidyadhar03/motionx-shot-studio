@@ -361,3 +361,22 @@ label .lbl { display: block; }
 .svc-state { display: inline-block; min-width: 76px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 .svc-state.ready { color: var(--ok); } .svc-state.unavailable { color: var(--warn); } .svc-state.starting, .svc-state.checking, .svc-state.unknown { color: var(--info); }
 .cap-dot.starting { background: var(--info); } .cap-state.starting { color: var(--info); }
+
+/* story stage */
+.story-read { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 14px; }
+.story-premise { font-size: 15.5px; color: var(--text); margin: 4px 0 8px; line-height: 1.5; }
+.story-facts { display: grid; grid-template-columns: 150px 1fr; gap: 6px 14px; margin: 0 0 6px; font-size: 13px; } .story-facts dt { color: var(--muted); } .story-facts dd { margin: 0; }
+.beats { margin: 4px 0 8px; padding-left: 22px; display: flex; flex-direction: column; gap: 10px; } .beats li::marker { color: var(--accent); font-weight: 600; }
+.beat-text { font-size: 13.5px; } .beat-adds { font-size: 12.5px; color: #c3c6cd; margin-top: 2px; } .beat-meta { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+.beats.compact { gap: 3px; font-size: 13px; color: #c3c6cd; }
+.source-block { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 8px 0; background: var(--panel2); }
+.source-block summary { cursor: pointer; font-size: 12.5px; color: #b4b7bf; margin: 6px 0; } .source-block ul { margin: 4px 0 6px; padding-left: 18px; font-size: 13px; }
+.diff-text .dl { white-space: pre-wrap; } .diff-text .del { color: #f08a7d; background: rgba(229, 96, 79, .1); } .diff-text .ins { color: #7fe0ab; background: rgba(76, 195, 138, .1); }
+.approval-block { border: 1px solid #5a4620; background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; margin: 10px 0; display: flex; flex-direction: column; gap: 8px; }
+.story-review ul { margin: 6px 0; } .story-review input { margin: 6px 0; }
+.story-summary { background: var(--panel); border: 1px solid var(--line2); border-radius: 12px; padding: 14px 18px; }
+.ss-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.script-box { font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
+.serves { font-size: 12.5px; color: #c3c6cd; margin: 2px 0 6px; } .story-card .pc-summary { font-size: 13.5px; }
+.beat-edit { display: grid; grid-template-columns: 28px 1fr 1fr auto; gap: 6px; align-items: start; }
+@media (max-width: 760px) { .story-facts { grid-template-columns: 1fr; } .beat-edit { grid-template-columns: 1fr; } }

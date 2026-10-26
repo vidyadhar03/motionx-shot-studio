@@ -6,6 +6,9 @@ import { formatHash, parseHash, readSaved, resolveStart, Route, Section, writeSa
 
 export type ProjectFull = Project & { shots: ShotSummary[]; scenes: Scene[] };
 export type DirectorPrefill = { nonce: number; text: string; shotId: string | null };
+/** A message the person explicitly asked to send (e.g. "Approve & prepare shot plan"). The client id is deterministic,
+ *  so a repeated click or a reload can't send it twice (the server refuses a repeated id in the project). */
+export type DirectorSend = { nonce: number; text: string; clientId: string };
 type Studio = {
   status: Status | null; presets: Presets | null; agentCfg: AgentConfig | null;
   projects: Project[]; project: ProjectFull | null; overview: Overview | null; assets: Asset[]; prep: Preparation | null;
@@ -18,6 +21,8 @@ type Studio = {
   newProject: (name: string) => Promise<void>;
   directorOpen: boolean; setDirectorOpen: (v: boolean) => void;
   prefill: DirectorPrefill | null; askDirector: (text: string, shotId?: string | null) => void;
+  sendRequest: DirectorSend | null; sendDirector: (text: string, clientId: string) => void;
+  planOpen: boolean; setPlanOpen: (v: boolean) => void;
   drafts: React.MutableRefObject<Map<string, string>>;
 };
 const Ctx = createContext<Studio | null>(null);
@@ -41,6 +46,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [directorPref, setDirectorPref] = useState<boolean | null>(null);   // null = default: open beside the video on Shots (wide screens)
   const wide = useMedia("(min-width: 1180px)");
   const [prefill, setPrefill] = useState<DirectorPrefill | null>(null);
+  const [sendRequest, setSendRequest] = useState<DirectorSend | null>(null);
+  const [planOpen, setPlanOpen] = useState(false);
   const drafts = useRef(new Map<string, string>());
   const routeRef = useRef(route); routeRef.current = route;
   const wsPath = status?.workspace.path ?? null;
@@ -171,14 +178,18 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     setDirectorPref(true);
   }, []);
 
+  const sendDirector = useCallback((text: string, clientId: string) => {
+    setSendRequest({ nonce: Date.now(), text, clientId });
+    setDirectorPref(true);
+  }, []);
   const directorOpen = directorPref ?? (route.section === "shots" && wide);
   const setDirectorOpen = setDirectorPref;
   const value = useMemo<Studio>(() => ({
     status, presets, agentCfg, projects, project, overview, assets, prep, plan, ready,
     section: route.section, item: route.item, notes, dismissNote: (i) => setNotes((n) => n.filter((_, j) => j !== i)),
     error, fail, clearError: () => setError(null), reload, reloadStatus, go, setItemQuiet, newProject,
-    directorOpen, setDirectorOpen, prefill, askDirector, drafts,
+    directorOpen, setDirectorOpen, prefill, askDirector, drafts, sendRequest, sendDirector, planOpen, setPlanOpen,
   }), [status, presets, agentCfg, projects, project, overview, assets, prep, plan, ready, route, notes, error, fail, reload, reloadStatus, go,
-      setItemQuiet, newProject, directorOpen, prefill, askDirector]);
+      setItemQuiet, newProject, directorOpen, prefill, askDirector, sendRequest, sendDirector, planOpen]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

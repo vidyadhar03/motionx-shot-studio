@@ -75,11 +75,12 @@ export function orderedShots<T extends { scene_id: string | null; order_idx: num
 // -- next action -----------------------------------------------------------------------------------
 
 export type NextAction = {
-  kind: "start" | "working" | "attention" | "review" | "plan" | "asset" | "generate" | "prepare" | "export" | "idle";
+  kind: "start" | "working" | "attention" | "review" | "plan" | "story" | "asset" | "generate" | "prepare" | "export" | "idle";
   title: string; detail: string; cta: string; shotId?: string; handle?: string; section: "overview" | "assets" | "shots";
 };
 type Req = Pick<Preparation["requirements"][number], "handle" | "name" | "status" | "required">;
-export type PlanLite = { status: "draft" | "approved" | "changed_since_approval"; revision: number; approved_revision: number | null } | null;
+export type PlanLite = { status: "draft" | "approved" | "changed_since_approval"; revision: number; approved_revision: number | null;
+  story_status?: "none" | "draft" | "approved" | "changed"; story_review?: boolean; story_shots?: number } | null;
 
 const ASSET_VERB: Record<string, string> = {
   missing: "Add an image for", review: "Choose a version of", reference_only: "Approve a final reference for",
@@ -102,6 +103,15 @@ export function nextAction(shots: OverviewShot[], plan: PlanLite, reqs: Req[]): 
   if (review) {
     const t = awaitingReview(review)[0];
     return { kind: "review", title: `Review ${label(review)}`, detail: `Take ${t.number} is ready to watch. Approve and select it, or give feedback.`, cta: `Review shot ${num.get(review.id)}`, shotId: review.id, section: "shots" };
+  }
+  if (plan?.story_review) {
+    return { kind: "story", title: "Review the shots against the revised story", detail: "The approved story changed after shots were planned. Existing shots and takes are kept; decide whether they still fit.", cta: "Open story", section: "overview" };
+  }
+  if (plan && (plan.story_status === "draft" || plan.story_status === "changed")) {
+    return { kind: "story", title: `Review the story draft (revision ${plan.revision})`, detail: "Read what it explores, its beats and its ending. Approving it creates nothing; the shot plan comes next.", cta: "Open story", section: "overview" };
+  }
+  if (plan && plan.story_status === "approved" && !plan.story_shots) {
+    return { kind: "story", title: "Prepare the shot plan", detail: "The story is approved. Ask the director to divide it into shots, each serving the story's beats.", cta: "Open story", section: "overview" };
   }
   if (plan && plan.status !== "approved") {
     return { kind: "plan", title: `Review plan draft revision ${plan.revision}`, detail: plan.approved_revision ? `Revision ${plan.approved_revision} is still the approved plan.` : "Approving it creates the scene and shots. It starts no generation.", cta: "Review the plan", section: "overview" };

@@ -4,6 +4,7 @@ import { Modal, useDialogs } from "./dialogs";
 import { useGuard } from "./guard";
 import { useStudio } from "./store";
 import { fmtDate, fmtDateTime, Pill, SaveState } from "./ui";
+import { StoryApproval, StoryEdit, StoryRead, StoryReviewBanner, StoryStatusChips } from "./story/StoryView";
 
 const lines = (xs: string[]) => xs.join("\n");
 const unlines = (s: string) => s.split("\n").map((x) => x.trim()).filter(Boolean);
@@ -13,7 +14,7 @@ const unlines = (s: string) => s.split("\n").map((x) => x.trim()).filter(Boolean
 export default function PlanDrawer({ plan, presets, onClose }: { plan: Plan; presets: Presets; onClose: () => void }) {
   const S = useStudio();
   const { confirm } = useDialogs();
-  const [rev, setRev] = useState<number>(plan.approved_revision ?? plan.revision);
+  const [rev, setRev] = useState<number>(plan.content.story ? plan.revision : plan.approved_revision ?? plan.revision);
   const [doc, setDoc] = useState<PlanRevisionDoc | null>(null);
   const [draft, setDraft] = useState<PlanContent | null>(null);
   const [note, setNote] = useState("");
@@ -32,7 +33,9 @@ export default function PlanDrawer({ plan, presets, onClose }: { plan: Plan; pre
   useGuard("plan-edit", { label: "Edits to the plan (not saved as a new revision yet)", dirty: !!draft, save, discard: () => setDraft(null) });
 
   const approve = async () => {
-    if (!await confirm(`Approve plan revision ${latest}?`, "This creates the scene and any missing shots, and records the assets they need. It runs no generation.", { ok: `Approve revision ${latest}` })) return;
+    if (!await confirm(plan.content.story ? `Approve the shot plan (revision ${latest})?` : `Approve plan revision ${latest}?`,
+      "This creates the scene and any missing shots, and records the assets they need. Existing shots are never changed. It runs no generation.",
+      { ok: `Approve revision ${latest}` })) return;
     try { const r = await api.approvePlan(plan.id, latest); setReport(r.report); await S.reload(); } catch (e) { S.fail(e); }
   };
   const c = draft ?? doc?.content ?? null;
@@ -40,10 +43,13 @@ export default function PlanDrawer({ plan, presets, onClose }: { plan: Plan; pre
   const setShot = (i: number, patch: Partial<PlanShot>) => c && setDraft({ ...c, shots: c.shots.map((s, j) => (j === i ? { ...s, ...patch } : s)) });
   const meta = plan.revisions.find((r) => r.revision === rev);
   const approvedHere = plan.approved_revision === rev;
-  const tag = approvedHere ? <Pill tone="ok">Approved plan · rev {rev}</Pill> : isLatest ? <Pill tone="accent">Draft · rev {rev} · not approved</Pill> : <Pill tone="muted">Superseded · rev {rev}</Pill>;
+  const hasStory = !!plan.content.story;
+  const shotsGate = !hasStory ? null : plan.story_status !== "approved" ? "Approve the story first." : !plan.content.shots?.length ? "No shots yet."
+    : plan.content.story_basis?.story_hash !== plan.story_hash ? "These shots were planned from an earlier story; review them first." : null;
+  const tag = hasStory ? <StoryStatusChips plan={plan} /> : approvedHere ? <Pill tone="ok">Approved plan · rev {rev}</Pill> : isLatest ? <Pill tone="accent">Draft · rev {rev} · not approved</Pill> : <Pill tone="muted">Superseded · rev {rev}</Pill>;
 
   return (
-    <Modal title="Film plan" variant="drawer" wide onClose={onClose}>
+    <Modal title={hasStory ? "Story and shot plan" : "Film plan"} variant="drawer" wide onClose={onClose}>
       <div className="plan-drawer">
         <div className="plan-bar">
           <label className="inline">Revision
@@ -53,17 +59,22 @@ export default function PlanDrawer({ plan, presets, onClose }: { plan: Plan; pre
           {tag}
           <div className="spacer" />
           {isLatest && !draft && doc && <button className="small ghost" onClick={() => setDraft(structuredClone(doc.content))}>Edit as new revision</button>}
-          {isLatest && !draft && plan.status !== "approved" && <button className="small primary" onClick={approve}>Approve rev {latest}</button>}
+          {isLatest && !draft && plan.status !== "approved" && (!hasStory || plan.content.shots?.length > 0) &&
+            <button className="small primary" disabled={!!shotsGate} title={shotsGate ?? ""} onClick={approve}>{hasStory ? `Approve shot plan rev ${latest}` : `Approve rev ${latest}`}</button>}
+          {isLatest && !draft && plan.status !== "approved" && shotsGate && plan.content.shots?.length > 0 && <span className="reason">{shotsGate}</span>}
         </div>
-        {plan.approved_revision && plan.approved_revision !== latest && (
+        {hasStory && <StoryReviewBanner plan={plan} />}
+        {hasStory && <StoryApproval plan={plan} viewingLatest={isLatest && !draft} />}
+        {!hasStory && plan.approved_revision && plan.approved_revision !== latest && (
           <div className="note info">Revision {plan.approved_revision} is the approved plan{plan.approved_at ? ` (approved ${fmtDateTime(plan.approved_at)})` : ""}. Revision {latest} is a newer draft and hasn't been approved.</div>)}
         {!isLatest && !approvedHere && <div className="note info">An older revision, kept for history. It is not the approved plan and not the latest draft.</div>}
-        {meta && <div className="muted">Written by {meta.author === "agent" ? "the director" : meta.author} · {fmtDateTime(meta.at)}{meta.note ? ` · ${meta.note}` : ""}</div>}
+        {meta && <div className="muted">Written by {meta.author === "agent" ? "the director" : meta.author === "user" ? "you" : meta.author} · {fmtDateTime(meta.at)}{meta.note ? ` · ${meta.note}` : ""}</div>}
         {report && <div className="note ok">Approved. Created shots: {report.created_shots.map((s: any) => s.key).join(", ") || "none"}.
           {report.unchanged_shots.length > 0 && ` Existing shots left unchanged: ${report.unchanged_shots.map((s: any) => `${s.key}${s.plan_differs_in.length ? ` (plan differs in ${s.plan_differs_in.join(", ")})` : ""}`).join("; ")}.`}</div>}
         {!c && <p className="muted">Loading revision…</p>}
         {c && (draft ? (
           <div className="form plan-form">
+            {c.story && <StoryEdit story={c.story} onChange={(st) => setDraft({ ...c, story: st })} />}
             <label>Title<input value={c.title} onChange={(e) => setDraft({ ...c, title: e.target.value })} /></label>
             <label>Logline<input value={c.logline} onChange={(e) => setDraft({ ...c, logline: e.target.value })} /></label>
             <label>Treatment<textarea rows={5} value={c.treatment} onChange={(e) => setDraft({ ...c, treatment: e.target.value })} /></label>
@@ -77,6 +88,7 @@ export default function PlanDrawer({ plan, presets, onClose }: { plan: Plan; pre
         ) : (
           <div className="plan-read">
             <h3>{c.title}</h3>
+            {c.story && <StoryRead story={c.story} revision={rev} />}
             {c.logline && <p className="logline">{c.logline}</p>}
             <p>{c.treatment}</p>
             <div className="grid2">
@@ -88,8 +100,10 @@ export default function PlanDrawer({ plan, presets, onClose }: { plan: Plan; pre
           </div>
         ))}
 
-        {c && <>
-          <h4>Scene: {c.scene.name} · {c.shots.length} shots · {c.shots.reduce((n, s) => n + s.duration_s, 0)} s</h4>
+        {c && c.story && c.shots.length === 0 && <><h4>Shot plan</h4><p className="muted">No shots yet. The shot plan comes after the story is approved; each shot will say which beats it serves.</p></>}
+        {c && c.shots.length > 0 && <>
+          <h4>{c.story ? "Shot plan · " : ""}Scene: {c.scene.name} · {c.shots.length} shots · {c.shots.reduce((n, s) => n + s.duration_s, 0)} s</h4>
+          {c.story_basis && <p className="muted small-note">Planned from story revision {c.story_basis.story_revision}{c.story_basis.story_hash !== plan.story_hash ? " (an earlier story than the approved one)" : ""}.</p>}
           <p className="muted small-note">{approvedHere ? "The shots as planned at approval. The shots in the project may have been edited since; the Shots screen shows their current state." : "Planned shots in this revision."}</p>
           <div className="plan-shots">
             {c.shots.map((s, i) => (
@@ -98,6 +112,7 @@ export default function PlanDrawer({ plan, presets, onClose }: { plan: Plan; pre
                   {draft ? <input aria-label={`Title of ${s.key}`} value={s.title} onChange={(e) => setShot(i, { title: e.target.value })} /> : <span>{s.title}</span>}
                   {shotLink(s.key) && !draft && <button className="small ghost" onClick={() => { onClose(); S.go({ section: "shots", item: shotLink(s.key)! }); }}>Open shot →</button>}
                 </div>
+                {s.beats && <div className="serves"><span className="chip accent">{s.beats.join(" + ")}</span> {s.serves}</div>}
                 {draft ? (
                   <div className="form">
                     <label>Action<textarea rows={2} value={s.action ?? ""} onChange={(e) => setShot(i, { action: e.target.value })} /></label>
@@ -127,6 +142,7 @@ export default function PlanDrawer({ plan, presets, onClose }: { plan: Plan; pre
                 {isLatest && (plan.warnings[s.key] ?? []).map((w) => <div key={w.code} className="hint warn-text">⚠ {w.message}</div>)}
               </div>))}
           </div>
+          {isLatest && (plan.warnings["_story"] ?? []).map((w) => <div key={w.code} className="hint warn-text">⚠ {w.message}</div>)}
           <h4>Assets the shots need</h4>
           <ul className="plan-assets">{c.assets.map((a) => <li key={a.handle}><strong>@{a.handle}</strong> · {a.kind} · {a.required ? "required" : "optional"} · suggested: {a.source}<div className="muted">{a.description}</div></li>)}</ul>
         </>}

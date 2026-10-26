@@ -135,6 +135,17 @@ class PlanIn(BaseModel):
 class ApproveIn(BaseModel):
     expected_revision: int
 
+
+class SourceIn(BaseModel):
+    title: str = ""
+    text: str
+
+
+class StoryReviewIn(BaseModel):
+    story_revision: int
+    decision: str
+    note: str = ""
+
 class AssetGenIn(BaseModel):
     handle: str
     prompt: str
@@ -369,6 +380,30 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     def approve_plan(plan_id: str, body: ApproveIn) -> dict:
         # HUMAN-ONLY: the only caller of Planning.approve(). No agent tool wraps it.
         return planning.approve(plan_id, body.expected_revision, by="user")
+
+    # -- story stage (HUMAN-ONLY approvals and reviews; no agent tool wraps them) --------------
+    @app.post("/api/plans/{plan_id}/approve-story")
+    def approve_story(plan_id: str, body: ApproveIn) -> dict:
+        """Approval only: creates no scene, shot, requirement, proposal or spend."""
+        return planning.approve_story(plan_id, body.expected_revision, by="user")
+
+    @app.post("/api/plans/{plan_id}/story-review")
+    def story_review(plan_id: str, body: StoryReviewIn) -> dict:
+        return planning.review_story_change(plan_id, body.story_revision, body.decision, body.note, by="user")
+
+    @app.post("/api/projects/{pid}/story-sources", status_code=201)
+    def add_story_source(pid: str, body: SourceIn) -> dict:
+        """A pasted script, stored verbatim and immutably."""
+        return planning.add_source(pid, body.title, body.text, kind="pasted", by="user")
+
+    @app.get("/api/projects/{pid}/story-sources")
+    def list_story_sources(pid: str) -> list[dict]:
+        ops.get_project(pid)
+        return planning.sources(pid)
+
+    @app.get("/api/story-sources/{sid}")
+    def get_story_source(sid: str) -> dict:
+        return planning.source(sid)
 
     # -- M6: asset preparation and image generation -----------------------------------------
     @app.get("/api/projects/{pid}/preparation")

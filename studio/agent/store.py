@@ -131,9 +131,11 @@ class AgentStore:
         return self.db.one("SELECT COUNT(*) AS n FROM agent_usage WHERE live=1 AND thread_id=?", thread_id)["n"]
 
     def has_client_id(self, tid: str, client_id: str) -> bool:
-        """True if this conversation already holds a user message sent with this client id (a repeated click/retry)."""
-        return bool(self.db.one("SELECT 1 AS x FROM agent_messages WHERE thread_id=? AND kind='user' "
-                                "AND json_extract(content,'$.client_id')=?", tid, client_id))
+        """True if any conversation of this thread's project already holds a user message sent with this client id
+        (a repeated click, a retry, or the same one-off request from another conversation or a reload)."""
+        return bool(self.db.one("SELECT 1 AS x FROM agent_messages m JOIN agent_threads t ON t.id=m.thread_id "
+                                "WHERE t.project_id=(SELECT project_id FROM agent_threads WHERE id=?) AND m.kind='user' "
+                                "AND json_extract(m.content,'$.client_id')=?", tid, client_id))
 
     def usage(self, tid: str) -> list[dict]:
         return self.db.all("SELECT * FROM agent_usage WHERE thread_id=? ORDER BY id", tid)

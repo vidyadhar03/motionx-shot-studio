@@ -6,6 +6,7 @@ needs. Readiness is derived from real asset versions, never stored. Nothing here
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from typing import Any
@@ -20,6 +21,11 @@ ASSET_SOURCES = ("upload", "generate", "either")
 _KEY = re.compile(r"^[a-z0-9][a-z0-9_-]{0,23}$")
 LIMITS = {"title": 120, "logline": 300, "treatment": 3000, "list_item": 400, "list_len": 12, "shots": 6,
           "assets": 9, "image_prompt": 2000}
+STORY_TEXT = {"premise": 400, "explores": 400, "audience": 400, "development": 1000, "ending": 400, "ending_why": 400,
+              "form": 60}
+STORY_REQUIRED = ("premise", "explores", "audience", "ending", "ending_why")
+SOURCE_LIMIT = 60_000
+REVIEW_DECISIONS = ("keep", "needs_revision", "revised")
 
 
 def _text(v: Any, field: str, limit: int, required: bool = False) -> str:
@@ -43,26 +49,96 @@ def _lines(v: Any, field: str) -> list[str]:
     return [_text(x, f"{field} item", LIMITS["list_item"], required=True) for x in v]
 
 
+def validate_story(st: Any) -> dict[str, Any]:
+    """Normalise the story section. Bounds stop abuse; they are not creative targets (no beat-count formula)."""
+    if not isinstance(st, dict):
+        raise ValueError("story must be an object")
+    allowed = set(STORY_TEXT) | {"beats", "duration_target_s", "source", "script_text", "changes_from_source", "self_check"}
+    unknown = set(st) - allowed
+    if unknown:
+        raise ValueError(f"unknown story field(s): {', '.join(sorted(unknown))}")
+    out: dict[str, Any] = {k: _text(st.get(k), f"story.{k}", n, required=k in STORY_REQUIRED) for k, n in STORY_TEXT.items()}
+    d = st.get("duration_target_s")
+    if d not in (None, ""):
+        if not isinstance(d, (int, float)) or not 4 <= int(d) <= 600:
+            raise ValueError("story.duration_target_s must be a number of seconds, 4-600")
+        out["duration_target_s"] = int(d)
+    beats_in = st.get("beats")
+    if not isinstance(beats_in, list) or not 1 <= len(beats_in) <= 20:
+        raise ValueError("story.beats must list 1-20 beats")
+    beats, keys = [], []
+    for i, b in enumerate(beats_in, 1):
+        if not isinstance(b, dict):
+            raise ValueError(f"beat {i} must be an object")
+        key = str(b.get("key") or f"b{i}").lower()
+        if not _KEY.match(key) or key in keys:
+            raise ValueError(f"beat {i}: key must be unique, lowercase letters/digits (e.g. b{i})")
+        keys.append(key)
+        origin = b.get("origin", "added")
+        if origin not in ("from_you", "from_source", "added"):
+            raise ValueError(f"beat {key}: origin must be from_you, from_source or added")
+        beat = {"key": key, "text": _text(b.get("text"), f"beat {key} text", 600, required=True),
+                "adds": _text(b.get("adds"), f"beat {key} adds", 300, required=True), "origin": origin}
+        if b.get("source_lines"):
+            beat["source_lines"] = _text(str(b["source_lines"]), f"beat {key} source_lines", 40)
+        beats.append(beat)
+    out["beats"] = beats
+    src = st.get("source") or {"kind": "idea"}
+    if not isinstance(src, dict) or src.get("kind") not in ("idea", "script"):
+        raise ValueError("story.source must be {kind: idea} or {kind: script, source_id, relation}")
+    if src["kind"] == "script":
+        if not str(src.get("source_id", "")).startswith("src_"):
+            raise ValueError("a script-based story needs source.source_id (a stored source)")
+        if src.get("relation") not in ("as_written", "adapted"):
+            raise ValueError("source.relation must be as_written or adapted")
+        out["source"] = {"kind": "script", "source_id": src["source_id"], "relation": src["relation"]}
+    else:
+        out["source"] = {"kind": "idea"}
+    out["script_text"] = _text(st.get("script_text"), "story.script_text", 30_000)
+    out["changes_from_source"] = _lines(st.get("changes_from_source"), "story.changes_from_source")
+    rel = out["source"].get("relation")
+    if rel == "as_written" and out["script_text"]:
+        raise ValueError("a story used as written must not carry script_text: the stored source is the script. "
+                         "To change it, make an adaptation (relation: adapted) and list the changes")
+    if rel == "adapted" and (not out["script_text"] or not out["changes_from_source"]):
+        raise ValueError("an adaptation needs the adapted script_text and the list of changes_from_source")
+    if rel != "adapted" and out["changes_from_source"]:
+        raise ValueError("changes_from_source only applies to an adaptation")
+    sc = st.get("self_check") or {}
+    if not isinstance(sc, dict):
+        raise ValueError("story.self_check must be an object")
+    out["self_check"] = {k: _text(sc.get(k), f"self_check.{k}", 400) for k in ("repetition", "assumptions", "ending") if sc.get(k)}
+    return {k: v for k, v in out.items() if v not in ("", [], {}, None)}
+
+
+def story_hash(story: dict[str, Any] | None) -> str | None:
+    if not story:
+        return None
+    return hashlib.sha256(json.dumps(story, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
 def validate_plan(content: dict[str, Any]) -> tuple[dict[str, Any], dict[str, list[dict]]]:
     """Normalise a plan and check it. Raises ValueError with what to fix; returns (plan, warnings per shot)."""
     if not isinstance(content, dict):
         raise ValueError("a plan is an object")
     unknown = set(content) - {"title", "logline", "treatment", "observed", "creative_additions", "guardrails", "open_questions",
-                              "scene", "shots", "assets"}
+                              "scene", "shots", "assets", "story", "story_basis"}
     if unknown:
         raise ValueError(f"unknown plan field(s): {', '.join(sorted(unknown))}")
+    story = validate_story(content["story"]) if content.get("story") else None
+    shots_in = content.get("shots") or []
     plan: dict[str, Any] = {
         "title": _text(content.get("title"), "title", LIMITS["title"], required=True),
         "logline": _text(content.get("logline"), "logline", LIMITS["logline"]),
-        "treatment": _text(content.get("treatment"), "treatment", LIMITS["treatment"], required=True),
+        "treatment": _text(content.get("treatment"), "treatment", LIMITS["treatment"], required=story is None),
         "observed": _lines(content.get("observed"), "observed"),
         "creative_additions": _lines(content.get("creative_additions"), "creative_additions"),
         "guardrails": _lines(content.get("guardrails"), "guardrails"),
         "open_questions": _lines(content.get("open_questions"), "open_questions"),
     }
     scene = content.get("scene") or {}
-    plan["scene"] = {"name": _text(scene.get("name") if isinstance(scene, dict) else None, "scene.name", 120,
-                                   required=True)}
+    name = _text(scene.get("name") if isinstance(scene, dict) else None, "scene.name", 120, required=bool(shots_in) or story is None)
+    plan["scene"] = {"name": name} if name else {}
     assets, handles = [], []
     for i, a in enumerate(content.get("assets") or [], 1):
         if not isinstance(a, dict):
@@ -85,9 +161,10 @@ def validate_plan(content: dict[str, Any]) -> tuple[dict[str, Any], dict[str, li
     if len(assets) > LIMITS["assets"]:
         raise ValueError(f"at most {LIMITS['assets']} assets")
     plan["assets"] = assets
-    shots_in = content.get("shots") or []
-    if not isinstance(shots_in, list) or not 1 <= len(shots_in) <= LIMITS["shots"]:
-        raise ValueError(f"a plan has 1-{LIMITS['shots']} shots")
+    lo = 0 if story else 1                                 # a story stage may have no shots yet
+    if not isinstance(shots_in, list) or not lo <= len(shots_in) <= LIMITS["shots"]:
+        raise ValueError(f"a plan has {lo}-{LIMITS['shots']} shots" + ("" if story else " (or a story and no shots yet)"))
+    beat_keys = [b["key"] for b in story["beats"]] if story else []
     shots, keys, warnings = [], [], {}
     for i, sh in enumerate(shots_in, 1):
         if not isinstance(sh, dict):
@@ -96,7 +173,7 @@ def validate_plan(content: dict[str, Any]) -> tuple[dict[str, Any], dict[str, li
         if not _KEY.match(key) or key in keys:
             raise ValueError(f"shot {i}: key must be unique, lowercase letters/digits (e.g. s{i})")
         keys.append(key)
-        unknown = set(sh) - set(PLAN_SHOT_FIELDS) - {"key", "assets"}
+        unknown = set(sh) - set(PLAN_SHOT_FIELDS) - {"key", "assets", "beats", "serves"}
         if unknown:
             raise ValueError(f"shot {key}: unknown field(s) {', '.join(sorted(unknown))}")
         fields = {k: sh[k] for k in PLAN_SHOT_FIELDS if k in sh}
@@ -120,8 +197,24 @@ def validate_plan(content: dict[str, Any]) -> tuple[dict[str, Any], dict[str, li
             raise ValueError(f"shot {key} needs @{', @'.join(missing)}, which the plan's assets don't list")
         if len(needs) > 9:
             raise ValueError(f"shot {key}: at most 9 reference assets")
-        shots.append({"key": key, **clean, "assets": needs})
+        extra: dict[str, Any] = {}
+        if story:
+            served = [str(b).lower() for b in (sh.get("beats") or [])]
+            bad = [b for b in served if b not in beat_keys]
+            if not served or bad:
+                raise ValueError(f"shot {key}: list the story beats it serves in beats ({', '.join(beat_keys)})"
+                                 + (f"; unknown: {', '.join(bad)}" if bad else ""))
+            extra = {"beats": served, "serves": _text(sh.get("serves"), f"shot {key} serves", 300, required=True)}
+        elif sh.get("beats") or sh.get("serves"):
+            raise ValueError(f"shot {key}: beats/serves need a story in the plan")
+        shots.append({"key": key, **clean, "assets": needs, **extra})
     plan["shots"] = shots
+    if story:
+        plan["story"] = story
+        unserved = [b for b in beat_keys if shots and not any(b in s["beats"] for s in shots)]
+        if unserved:
+            warnings["_story"] = [{"level": "warning", "code": "beat_unserved",
+                                   "message": f"no shot serves beat {', '.join(unserved)} yet"}]
     return plan, warnings
 
 
@@ -148,7 +241,11 @@ class Planning:
         status = ("approved" if approved == row["revision"] else
                   "changed_since_approval" if approved else "draft")
         links = self.db.all("SELECT kind, item_key, target_id, plan_revision FROM plan_links WHERE plan_id=?", row["id"])
+        h = story_hash(content.get("story"))
+        story_status = ("none" if not h else "approved" if h == row.get("story_hash") else
+                        "changed" if row.get("story_hash") else "draft")
         return {**row, "status": status, "content": content, "warnings": warnings, "links": links,
+                "story_status": story_status, "story_review": self.review_state(row),
                 "revisions": [{"revision": r["revision"], "author": r["author"], "note": r["note"], "at": r["at"],
                                "approved": r["revision"] == approved} for r in revs]}
 
@@ -159,14 +256,41 @@ class Planning:
         return {**r, "content": json.loads(r["content"])}
 
     def write_plan(self, pid: str, content: dict, *, expected_revision: int | None, author: str = "user",
-                   note: str = "") -> dict:
+                   note: str = "", _basis: dict | None = None) -> dict:
         """Create the project's plan (expected_revision None) or add a revision. A full plan object each time:
-        the revision is self-contained and the diff is computed on read."""
+        the revision is self-contained and the diff is computed on read.
+
+        Story plans: `story_basis` is written here, never taken from input. Shots unchanged from the previous revision
+        keep its basis (they weren't re-derived); new or changed shots must be planned against the APPROVED story."""
         self.ops.get_project(pid)
         plan, _ = validate_plan(content)
+        story = plan.get("story")
+        if story and story["source"]["kind"] == "script":
+            src = self.db.one("SELECT project_id FROM story_sources WHERE id=?", story["source"]["source_id"])
+            if not src or src["project_id"] != pid:
+                raise ValueError(f"story.source.source_id {story['source']['source_id']} is not a stored source of this project")
         ts = now()
         with self.db.tx(immediate=True) as c:
             row = c.execute("SELECT * FROM plans WHERE project_id=?", (pid,)).fetchone()
+            if story and plan["shots"]:
+                if _basis is not None:
+                    plan["story_basis"] = _basis
+                else:
+                    prev = None
+                    if row is not None:
+                        r = c.execute("SELECT content FROM plan_revisions WHERE plan_id=? AND revision=?",
+                                      (row["id"], row["revision"])).fetchone()
+                        prev = json.loads(r["content"]) if r else None
+                    if prev and prev.get("shots") == plan["shots"]:
+                        if prev.get("story_basis"):
+                            plan["story_basis"] = prev["story_basis"]          # shots unchanged: same basis
+                    else:
+                        h = story_hash(story)
+                        if row is None or row["story_hash"] != h:
+                            raise ConflictError("shots can only be planned against the approved story; this story "
+                                                "isn't approved (or differs from the approved one). Ask the person to "
+                                                "review and approve the story first")
+                        plan["story_basis"] = {"story_revision": row["story_approved_revision"], "story_hash": h}
             if row is None:
                 if expected_revision not in (None, 0):
                     raise ConflictError("this project has no plan yet; create it without expected_revision")
@@ -182,6 +306,113 @@ class Planning:
             c.execute("INSERT INTO plan_revisions(plan_id,revision,content,author,note,at) VALUES (?,?,?,?,?,?)",
                       (plan_id, rev, dumps(plan), author, note[:500], ts))
         return self._out(self._row(plan_id))
+
+    # -- story approval and review (HUMAN ONLY: API routes are the only callers) ------------------
+    def approve_story(self, plan_id: str, expected_revision: int, by: str = "user") -> dict:
+        """Approve the story of an exact revision. Creates nothing: no scene, shot, requirement, proposal or spend."""
+        row = self._row(plan_id)
+        if row["revision"] != expected_revision:
+            raise ConflictError(f"the plan is at revision {row['revision']}, not {expected_revision}; review the latest "
+                                "story before approving")
+        story = self.plan_revision(plan_id, row["revision"])["content"].get("story")
+        if not story:
+            raise ConflictError("this revision has no story to approve")
+        h = story_hash(story)
+        if row["story_hash"] != h:
+            with self.db.tx() as c:
+                c.execute("UPDATE plans SET story_approved_revision=?, story_approved_at=?, story_approved_by=?, story_hash=? "
+                          "WHERE id=? AND revision=?", (row["revision"], now(), by, h, plan_id, row["revision"]))
+        return self._out(self._row(plan_id))
+
+    def review_state(self, row: dict) -> dict:
+        """Existing shots made from a different story than the approved one, and the person's latest decision."""
+        if not row.get("story_hash"):
+            return {"needed": False, "affected": [], "state": "none"}
+        approved_story = self.plan_revision(row["id"], row["story_approved_revision"])["content"].get("story") or {}
+        now_beats = {b["key"]: b for b in approved_story.get("beats", [])}
+        affected = []
+        for l in self.db.all("SELECT item_key, target_id, plan_revision FROM plan_links WHERE plan_id=? AND kind='shot' "
+                             "ORDER BY plan_revision, item_key", row["id"]):
+            made = self.plan_revision(row["id"], l["plan_revision"])["content"]
+            basis = made.get("story_basis") or {}
+            if basis.get("story_hash") == row["story_hash"]:
+                continue
+            old_beats = {b["key"]: b for b in (made.get("story") or {}).get("beats", [])}
+            plan_shot = next((x for x in made.get("shots", []) if x["key"] == l["item_key"]), {})
+            changes = []
+            for k in plan_shot.get("beats", []):
+                if k not in now_beats:
+                    changes.append({"beat": k, "change": "removed", "was": old_beats.get(k, {}).get("text", "")})
+                elif old_beats.get(k, {}).get("text") != now_beats[k]["text"] or old_beats.get(k, {}).get("adds") != now_beats[k]["adds"]:
+                    changes.append({"beat": k, "change": "changed", "was": old_beats.get(k, {}).get("text", ""), "now": now_beats[k]["text"]})
+            try:
+                title = self.ops.get_shot_row(l["target_id"])["title"]
+            except NotFoundError:
+                continue
+            affected.append({"shot_id": l["target_id"], "key": l["item_key"], "title": title, "beats": plan_shot.get("beats", []),
+                             "basis_revision": basis.get("story_revision"), "beat_changes": changes})
+        last = self.db.one("SELECT * FROM story_reviews WHERE plan_id=? AND story_hash=? ORDER BY at DESC, rowid DESC LIMIT 1",
+                           row["id"], row["story_hash"])
+        if not affected:
+            return {"needed": False, "affected": [], "state": "none", "last_review": last}
+        needed = last is None or last["decision"] == "needs_revision"
+        state = "review_needed" if last is None else "revision_needed" if last["decision"] == "needs_revision" else last["decision"]
+        return {"needed": needed, "state": state, "affected": affected, "story_revision": row["story_approved_revision"],
+                "new_beats": [k for k in now_beats if not any(k in a["beats"] for a in affected)], "last_review": last}
+
+    def review_story_change(self, plan_id: str, story_revision: int, decision: str, note: str = "", by: str = "user") -> dict:
+        """The person's explicit decision about existing shots after the approved story changed. Never edits a shot,
+        take, selection or lock. `keep` also records, in a new plan revision, that the unchanged shots now serve the
+        approved story (so the shot plan can be approved against it)."""
+        if decision not in REVIEW_DECISIONS:
+            raise ValueError(f"decision must be one of {', '.join(REVIEW_DECISIONS)}")
+        row = self._row(plan_id)
+        if row["story_approved_revision"] != story_revision:
+            raise ConflictError(f"the approved story is revision {row['story_approved_revision']}, not {story_revision}; reload")
+        state = self.review_state(row)
+        if not state["affected"]:
+            raise ConflictError("no existing shots were planned against a different story; nothing to review")
+        if decision == "keep":
+            latest = self.plan_revision(plan_id, row["revision"])["content"]
+            if story_hash(latest.get("story")) != row["story_hash"]:
+                raise ConflictError("the latest revision has an unapproved story draft; approve or discard it before keeping shots")
+            if not latest.get("shots"):
+                raise ConflictError("the latest revision has no shots to keep")
+        with self.db.tx() as c:
+            c.execute("INSERT INTO story_reviews(id,plan_id,story_revision,story_hash,decision,note,affected,by,at) "
+                      "VALUES (?,?,?,?,?,?,?,?,?)", (new_id("srv"), plan_id, story_revision, row["story_hash"], decision,
+                                                     note[:500], dumps([a["shot_id"] for a in state["affected"]]), by, now()))
+        if decision == "keep":
+            latest = self.plan_revision(plan_id, row["revision"])["content"]
+            self.write_plan(row["project_id"], latest, expected_revision=row["revision"], author=by,
+                            note=f"kept existing shots after reviewing story revision {story_revision}",
+                            _basis={"story_revision": story_revision, "story_hash": row["story_hash"]})
+        return self._out(self._row(plan_id))
+
+    # -- supplied scripts (stored verbatim; never edited) ------------------------------------------
+    def add_source(self, pid: str, title: str, text: str, *, kind: str = "pasted", by: str = "user") -> dict:
+        self.ops.get_project(pid)
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("the script is empty")
+        if len(text) > SOURCE_LIMIT:
+            raise ValueError(f"the script is {len(text):,} characters; the limit is {SOURCE_LIMIT:,}")
+        title = (title or "").strip()[:120] or "Script"
+        sid = new_id("src")
+        with self.db.tx() as c:
+            c.execute("INSERT INTO story_sources(id,project_id,kind,title,text,sha256,created_by,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                      (sid, pid, kind, title, text, hashlib.sha256(text.encode()).hexdigest(), by, now()))
+        return self.source(sid)
+
+    def source(self, sid: str) -> dict:
+        r = self.db.one("SELECT * FROM story_sources WHERE id=?", sid)
+        if not r:
+            raise NotFoundError(f"story source {sid} not found")
+        return {**r, "chars": len(r["text"]), "lines": r["text"].count("\n") + 1}
+
+    def sources(self, pid: str) -> list[dict]:
+        return [{**r, "chars": len(r["text"])} for r in self.db.all(
+            "SELECT id, project_id, kind, title, sha256, created_by, created_at, text FROM story_sources WHERE project_id=? "
+            "ORDER BY created_at", pid)]
 
     def diff(self, plan_id: str, a: int, b: int) -> dict:
         x, y = self.plan_revision(plan_id, a)["content"], self.plan_revision(plan_id, b)["content"]
@@ -204,6 +435,16 @@ class Planning:
                                 "latest revision before approving")
         pid, rev = row["project_id"], row["revision"]
         plan = self.plan_revision(plan_id, rev)["content"]
+        if plan.get("story"):                                   # story plans: the shots must serve the approved story
+            h = story_hash(plan["story"])
+            if row["story_hash"] != h:
+                raise ConflictError("approve the story first: this revision's story isn't the approved one"
+                                    if row["story_hash"] else "approve the story first; the shot plan follows it")
+            if not plan.get("shots"):
+                raise ConflictError("this plan has an approved story but no shots yet; prepare the shot plan first")
+            if (plan.get("story_basis") or {}).get("story_hash") != h:
+                raise ConflictError("these shots were planned against an earlier story; review them against the "
+                                    "approved story first (keep them, or re-plan)")
         links = {(l["kind"], l["item_key"]): l["target_id"] for l in
                  self.db.all("SELECT * FROM plan_links WHERE plan_id=?", plan_id)}
         report: dict[str, Any] = {"created_shots": [], "unchanged_shots": [], "requirements": []}

@@ -111,6 +111,31 @@ Three sections in the header, plus the director, Export and Settings:
 
 The app remembers the last project, section, shot and asset per workspace (and in the URL, `#/<project>/<section>/<shot or asset>`). Nothing autosaves: edits stay local until you press Save, the place you are editing shows Unsaved / Saving / Saved, and leaving with unsaved edits asks whether to save, discard or stay.
 
+## Story before shots
+
+New films start with the story, not the camera. From **Overview → Start your film**:
+
+- **From an idea:** describe it; the director (in chat) helps shape a story draft: what the film explores, what the
+  audience should notice or feel, ordered beats with what each adds, and an ending with why it belongs. It asks only
+  questions that would change the story.
+- **From a script:** paste it. It is stored **verbatim and immutably** before anything else happens. Choose *Use as
+  written* (the director's beats are a reading of your script, which stays the script) or *Adapt it* (a separate
+  version, linked to the original, with every change listed and a line comparison). You can also paste a script in
+  chat; the director has the server store your message exactly, never a retyped copy.
+
+The story opens as a document from Overview or chat (**Open story**). **Approve story** records approval of that exact
+revision and creates nothing. **Approve & prepare shot plan** also sends one visible request to the director (model
+requests, possible LLM cost; never images or video), and repeated clicks or reloads can't send it twice. Every shot in
+the resulting plan names the beats it serves; the shot plan records the exact story revision and hash it came from,
+and is approved separately, as before (it creates missing shots and never changes existing ones).
+
+If the approved story changes after shots exist, nothing is rewritten: Overview and the story drawer say the shot plan
+needs review, list the affected shots and changed beats, and wait for your explicit decision (*Keep existing shots*,
+*Shots need revision*, then *I've revised the shots*). Approving a new shot plan doesn't clear that by itself.
+
+Projects planned before the story stage (like the flyover film) work exactly as before, with no new gates. "Add shots
+myself" still skips all of this. Details: [docs/STORY_DEVELOPMENT_SPEC.md](docs/STORY_DEVELOPMENT_SPEC.md).
+
 ## What you can do
 
 - **Projects:** a brief and direction (tone, era, palette, notes) that go into every prompt.

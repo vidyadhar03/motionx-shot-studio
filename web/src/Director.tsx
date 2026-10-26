@@ -11,7 +11,7 @@ const prettyModel = (m: string) => m.replace(/^gemini-/, "").replace(/^claude-/,
 const providerLabel = (t: { provider: string; model: string }) => (t.provider === "scripted" || t.provider === "replay" ? PROVIDER_NAME[t.provider] : `${PROVIDER_NAME[t.provider] ?? t.provider} ${prettyModel(t.model)}`);
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
-type Block = { key: string; msg?: ThreadView["messages"][number]; calls?: AgentCall[]; proposal?: { call: AgentCall; changes: string[] } };
+type Block = { key: string; msg?: ThreadView["messages"][number]; calls?: AgentCall[]; proposal?: { call: AgentCall; changes: string[] }; story?: AgentCall };
 type Live = { shots: Map<string, Shot>; gens: AssetGen[]; assets: Asset[] };
 
 /** The conversation with the director: the primary way to work on a shot. It lives in the shared right-hand slot,
@@ -67,11 +67,9 @@ export default function Director({ onClose }: { onClose: () => void }) {
   const send_ = eff ? threadSendState(eff, config, liveInThread) : null;
   const blocked = send_?.kind === "live_locked";
 
-  const send = async () => {
-    if (!text.trim() || busy || blocked) return;
-    sendId.current ??= uid();                                         // one id per message: a retry of this send is never run twice
-    const id = sendId.current;
-    setBusy(true);
+  const [note, setNote] = useState<string | null>(null);
+  const sendNow = async (msg: string, id: string, fromComposer: boolean) => {
+    setBusy(true); setNote(null);
     try {
       let v = view;
       if (!v) {                                                       // the first message creates the conversation (a local record), then sends
@@ -79,11 +77,27 @@ export default function Director({ onClose }: { onClose: () => void }) {
         setThreads((ts) => [t, ...ts]);
         v = await api.thread(t.id);
       }
-      setView(await api.sendAgent(v.thread.id, text.trim(), focus?.id ?? null, id));
-      setText(""); sendId.current = null;
+      const out = await api.sendAgent(v.thread.id, msg, focus?.id ?? null, id);
+      if (out.report?.stop === "duplicate") setNote("Already requested earlier, so nothing was sent again.");
+      setView(out);
+      if (fromComposer) { setText(""); sendId.current = null; }
       await S.reload();
     } catch (e) { fail(e); } finally { setBusy(false); }
   };
+  const send = async () => {
+    if (!text.trim() || busy || blocked) return;
+    sendId.current ??= uid();                                         // one id per message: a retry of this send is never run twice
+    await sendNow(text, sendId.current, true);          // exactly as typed: a pasted script keeps its whitespace
+  };
+  // An explicit request from elsewhere in the app (e.g. "Approve & prepare shot plan"): sent once, visibly, here.
+  const seenSend = useRef(0);
+  useEffect(() => {
+    const r = S.sendRequest;
+    if (!r || r.nonce === seenSend.current || !loaded) return;
+    seenSend.current = r.nonce;
+    if (blocked) { fail(new Error(`The director can't take the request: ${send_?.text}`)); return; }
+    sendNow(r.text, r.clientId, false);
+  }, [S.sendRequest, loaded]);                                        // eslint-disable-line react-hooks/exhaustive-deps
   const stop = () => { if (view) api.cancelAgent(view.thread.id).catch(fail); };
 
   // Current state of everything this conversation (or this shot) refers to, read live. Old messages never change.
@@ -116,6 +130,9 @@ export default function Director({ onClose }: { onClose: () => void }) {
       if (e.msg) { if (e.msg.kind === "user") writes = []; out.push({ key: e.key, msg: e.msg }); continue; }
       const c = e.call!;
       if (c.name === "write" && !c.result?.is_error) writes.push(c);
+      if (c.name === "write" && c.input.path === "/plan" && !c.result?.is_error && c.input.patch?.story) {
+        out.push({ key: e.key, story: c }); continue;
+      }
       if (c.name === "propose_generation" && !c.result?.is_error && (c.result?.content.proposal_id || c.result?.content.asset_generation_id)) {
         const mine = writes.filter((w) => String(w.input.path ?? "").includes(String(c.input.shot_id ?? "\u0000")));
         const changes = mine.flatMap((w) => Object.entries((w.result?.content.changed ?? {}) as Record<string, { from: unknown; to: unknown }>).map(([k, v]) => `${k}: ${fmt(v.from)} → ${fmt(v.to)}`));
@@ -160,6 +177,7 @@ export default function Director({ onClose }: { onClose: () => void }) {
         {earlier && <div className="dir-earlier">Earlier conversation · {fmtDate(lastAt)}. It may describe things that have since changed.</div>}
         {loaded && !blocks.length && !(focus?.selected_take_id && focus.locked) && <p className="muted dir-hint">{focus ? `Tell me what to change in ${focusLabel}, or ask me to apply its feedback. I'll prepare a proposal for you to approve.` : "Ask me to draft a film plan, prepare assets, or revise a shot. I can prepare proposals, but only you can approve them."}</p>}
         {blocks.map((b) => b.msg ? <Message key={b.key} m={b.msg} historical={b.msg.at < sessionStart.current} />
+          : b.story ? <StoryChatCard key={b.key} call={b.story} S={S} />
           : b.proposal ? <ProposalFor key={b.key} call={b.proposal.call} changes={b.proposal.changes} live={live} S={S} onChanged={changed} />
           : <Actions key={b.key} calls={b.calls!} />)}
         {history.length > 0 && focusShot && S.status && (
@@ -168,6 +186,7 @@ export default function Director({ onClose }: { onClose: () => void }) {
         {pinned && focusShot && config && S.status && (
           <div className="pinned"><div className="pin-label">Waiting for your approval on this shot</div>
             <VideoProposalCard proposal={pinned} shot={focusShot} status={S.status} onChanged={changed} onOpenShot={() => S.go({ section: "shots", item: focusShot.id })} onOpenTake={() => S.go({ section: "shots", item: focusShot.id })} /></div>)}
+        {note && <div className="dir-earlier" role="status">{note}</div>}
         {busy && <div className="working" role="status"><i className="spin" /> The director is working…<button className="small" onClick={stop}>Stop</button></div>}
       </div>
 
@@ -289,4 +308,26 @@ function ShotState({ row }: { row: import("./api").OverviewShot }) {
     if (row.locked) text += " The shot is locked from the director.";
   }
   return <div className={`dir-state ${sel ? "done" : ""}`} role="status">{sel && <span className="ds-check" aria-hidden="true">✓</span>}{row.locked && <span aria-hidden="true">🔒</span>}<span>{text}</span></div>;
+}
+
+/** A story the director wrote: what it is, and its CURRENT status (read from the plan, not from the message). */
+function StoryChatCard({ call, S }: { call: AgentCall; S: ReturnType<typeof useStudio> }) {
+  const st = call.input.patch.story as import("./api").Story;
+  const rev = Number(call.result?.content.plan_revision ?? 0);
+  const plan = S.plan;
+  const latest = plan?.revision ?? rev;
+  const approvedHere = plan?.story_approved_revision === rev && plan.story_status === "approved";
+  const status = !plan ? "…" : approvedHere ? "Approved" : plan.story_approved_revision && plan.story_approved_revision > rev ? "Superseded"
+    : latest > rev ? "Newer revision exists" : plan.story_status === "approved" ? "Approved" : "Draft · waiting for your review";
+  const tone = status === "Approved" ? "ok" : status.startsWith("Draft") ? "accent" : "muted";
+  const script = st.source?.kind === "script";
+  return (
+    <div className={`pcard story-card ${tone === "accent" ? "pending" : ""}`}>
+      <div className="pc-head"><span className="pc-kind">Story{script ? ` · ${st.source.kind === "script" && st.source.relation === "adapted" ? "adaptation" : "script as written"}` : ""}</span>
+        <strong>{S.project?.name}</strong><Pill tone={tone as "ok" | "accent" | "muted"}>{status}</Pill><span className="muted">rev {rev}</span></div>
+      <div className="pc-summary">{st.premise}</div>
+      <div className="muted">{st.beats?.length ?? 0} beat{st.beats?.length === 1 ? "" : "s"} · ends: {st.ending}</div>
+      <div className="pc-actions"><button className="small" onClick={() => S.setPlanOpen(true)}>Open story</button></div>
+    </div>
+  );
 }

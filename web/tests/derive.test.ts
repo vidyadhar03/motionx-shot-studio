@@ -144,3 +144,12 @@ test("local services: starting, ready and unavailable read differently and gate 
   const ok = status({}, true, { mode: "paid", state: "ready", ready: true, problems: [], services: svc("ready", "ok") });
   assert.equal(spendSummary([videoCap(ok), imageCap(null), agentCap(cfg())]).label, "Director ready · Generation requires approval");
 });
+
+test("story stage: next step asks for the story before shots, then the shot plan, then any review", () => {
+  const base = { status: "draft", revision: 1, approved_revision: null } as const;
+  assert.equal(nextAction([], { ...base, story_status: "draft", story_shots: 0 }, []).title, "Review the story draft (revision 1)");
+  assert.equal(nextAction([], { ...base, story_status: "approved", story_shots: 0 }, []).title, "Prepare the shot plan");
+  const s = shot("s1", 1, { takes: [take(1)], selected_take_id: "t1" });
+  assert.equal(nextAction([s], { status: "approved", revision: 3, approved_revision: 3, story_status: "approved", story_review: true, story_shots: 1 }, []).kind, "story");
+  assert.equal(nextAction([s], { status: "approved", revision: 3, approved_revision: 3, story_status: "none" }, []).kind, "export");   // legacy: no gate
+});

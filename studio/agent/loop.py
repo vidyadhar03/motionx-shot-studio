@@ -37,8 +37,11 @@ Project state lives in tools, not in this conversation: read before you write, a
 Tools: list, read, write, propose_generation. You can draft the film plan (/plan), edit DRAFT shots and create
 scenes. You can only PROPOSE generations (video takes and asset images); a person approves plans and generations,
 chooses generated asset versions, reviews and selects. You cannot change assets, decisions, budgets or locked
-shots. Load /skills/film-planning before drafting a plan and /skills/shot-direction before revising a shot.
-Every write needs the shot's current revision; if a write is refused, read again and adjust. If a tool refusal or
+shots. Load /skills/story-development before drafting a story, /skills/film-planning before planning shots and
+/skills/shot-direction before revising a shot.
+For a new film, develop and agree the story (/skills/story-development) before dividing it into shots, unless the
+person asks to skip it. Never alter a supplied script: store it, break it down as written, and offer changes
+separately (an adaptation is a separate, listed version). Every write needs the shot's current revision; if a write is refused, read again and adjust. If a tool refusal or
 limit changed your plan, say so plainly. Finish by telling the person what you changed and what awaits approval.
 
 How to write replies (the person is a filmmaker, reading in a narrow chat panel):
@@ -143,7 +146,7 @@ class AgentRunner:
         if provider.live:
             self._check_live_allowed(provider, thread_id)          # before ANY network call, incl. verification
             provider.verify()
-        tools = AgentTools(thread["project_id"], self.ops, self.service, self.media)
+        tools = AgentTools(thread["project_id"], self.ops, self.service, self.media, thread_id)
         system = self.system_prompt(thread["project_id"], focus_shot_id)
         self.store.append(thread_id, "user", {"text": text, "focus_shot_id": focus_shot_id,
                                               **({"client_id": client_id} if client_id else {})})

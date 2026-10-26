@@ -12,9 +12,12 @@ calibrated controls. Describe the picture plainly and expect to iterate.
 
 ## Coverage craft
 
-- **Space before faces.** Open a scene with a wide or establishing frame that tells the audience
-  where they are. Give the second shot to a detail (texture, object, weather), and start close-ups
-  after that.
+Coverage serves a story beat; it never replaces one. Use these habits when a beat needs them, not as a default
+order of shots.
+
+- **Orientation when it matters.** If a beat depends on knowing where we are, a frame that shows the place helps;
+  if the story works by withholding or discovery, don't establish first. There is no default wide → medium →
+  close-up order.
 - **Every cut needs a shot.** Between two significant actions there is the action, the reaction,
   an insert of the object involved, and the beat that connects them.
 - **Objects get their own frame.** A named object becomes significant through an insert.

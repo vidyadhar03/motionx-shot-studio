@@ -7,6 +7,7 @@ import { GuardProvider } from "./guard";
 import Header from "./Header";
 import { LayoutCtx, useMedia } from "./layout";
 import OverviewView from "./OverviewView";
+import PlanDrawer from "./PlanDrawer";
 import SettingsDialog from "./SettingsDialog";
 import ShotsView from "./ShotsView";
 import { StudioProvider, useStudio } from "./store";
@@ -72,6 +73,7 @@ function Shell() {
       </div>
       {settings && <SettingsDialog onClose={() => setSettings(false)} />}
       {exporting && S.project && <ExportDialog onClose={() => setExporting(false)} />}
+      {S.planOpen && S.plan && S.presets && <PlanDrawer plan={S.plan} presets={S.presets} onClose={() => S.setPlanOpen(false)} />}
     </LayoutCtx.Provider>
   );
 }

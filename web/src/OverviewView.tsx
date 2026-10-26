@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, Decision, Direction, media, OverviewShot, PlanContent } from "./api";
 import { agentCap, cardTake, nextAction, orderedShots, shotStatus } from "./derive";
 import { useGuard } from "./guard";
-import PlanDrawer from "./PlanDrawer";
+import { StoryStatusChips } from "./story/StoryView";
 import { useStudio } from "./store";
 import { fmtDate, Pill, SaveState, SaveStatus, VideoThumb } from "./ui";
 
@@ -10,8 +10,8 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n).replace(
 
 export default function OverviewView() {
   const S = useStudio();
-  const { project, overview, plan, prep, presets } = S;
-  const [planOpen, setPlanOpen] = useState(false);
+  const { project, overview, plan, prep } = S;
+  const setPlanOpen = S.setPlanOpen;
   const [approved, setApproved] = useState<PlanContent | null>(null);
   const ordered = useMemo(() => (overview && project ? orderedShots(overview.shots, project.scenes) : []), [overview, project]);
   const planId = plan?.id, approvedRev = plan?.approved_revision ?? null, latestRev = plan?.revision;
@@ -25,12 +25,12 @@ export default function OverviewView() {
   const synopsis = content?.logline || content?.treatment || project.brief;
   const selected = ordered.filter((s) => s.selected_take_id).length;
   const toReview = ordered.filter((s) => !s.selected_take_id && s.takes.some((t) => t.state === "succeeded" && t.review === "unreviewed" && t.output_sha)).length;
-  const next = nextAction(ordered, plan ? { status: plan.status, revision: plan.revision, approved_revision: plan.approved_revision } : null, prep.requirements);
+  const next = nextAction(ordered, plan ? { status: plan.status, revision: plan.revision, approved_revision: plan.approved_revision, story_status: plan.story_status, story_review: plan.story_review?.needed ?? false, story_shots: plan.content.shots?.length ?? 0 } : null, prep.requirements);
   const ready = prep.requirements.filter((r) => r.status === "ready");
   const empty = !ordered.length && !plan;
 
   const doNext = () => {
-    if (next.kind === "plan") setPlanOpen(true);
+    if (next.kind === "plan" || next.kind === "story") setPlanOpen(true);
     else if (next.kind === "export") document.dispatchEvent(new CustomEvent("open-export"));
     else if (next.kind === "start") document.getElementById("start-idea")?.focus();
     else S.go({ section: next.section, item: next.shotId ?? next.handle ?? null });
@@ -44,7 +44,8 @@ export default function OverviewView() {
           <h1>{project.name}</h1>
           {synopsis && !empty && <p className="synopsis">{clip(synopsis, 320)}</p>}
         </div>
-        {plan && (
+        {plan?.content.story && <div className="plan-state"><StoryStatusChips plan={plan} /><button className="small" onClick={() => setPlanOpen(true)}>Open story</button></div>}
+        {plan && !plan.content.story && (
           <div className="plan-state">
             {plan.approved_revision
               ? <Pill tone="ok">Plan approved · rev {plan.approved_revision}{plan.approved_at ? ` · ${fmtDate(plan.approved_at)}` : ""}</Pill>
@@ -54,6 +55,7 @@ export default function OverviewView() {
           </div>)}
       </section>
 
+      {plan?.content.story && <StoryCard />}
       {empty ? <StartFilm /> : (
         <>
           <section className={`next ${next.kind}`} aria-label="Next step">
@@ -61,6 +63,7 @@ export default function OverviewView() {
             <button className="primary" onClick={doNext}>{next.cta}</button>
           </section>
 
+          {!(plan?.content.story && !ordered.length) && <>
           <section className="progress-row" aria-label="Progress">
             <button className="progress-card" onClick={() => S.go({ section: "assets" })}>
               <div className="pc-label">Assets</div>
@@ -79,12 +82,15 @@ export default function OverviewView() {
             <div className="sec-head"><h2>Shots</h2><button className="small" onClick={() => S.go({ section: "shots" })}>Open Shots →</button></div>
             <ShotCards shots={ordered} num={num} sceneName={(id) => project.scenes.find((s) => s.id === id)?.name ?? null} onOpen={(id) => S.go({ section: "shots", item: id })} />
           </section>
+          </>}
         </>
       )}
 
+      {plan && !plan.content.story && (
+        <p className="muted small-note">This film was planned without a story stage, and that's fine. If you'd like, you can <button className="link" onClick={() =>
+          S.askDirector("Before we change any shots, help me write down the story of this film for review: what it explores, what the audience should feel, the beats and the ending. Don't change the existing plan or shots.")}>develop the story with the director</button>; nothing changes until you approve it.</p>)}
       <BriefSection />
       <Decisions />
-      {planOpen && plan && presets && <PlanDrawer plan={plan} presets={presets} onClose={() => setPlanOpen(false)} />}
       {!plan && !empty && <p className="muted">No film plan yet. Ask the director to draft one, or keep adding shots yourself.</p>}
     </div>
   );
@@ -128,16 +134,30 @@ function ShotCards({ shots, num, sceneName, onOpen }: { shots: OverviewShot[]; n
 function StartFilm() {
   const S = useStudio();
   const p = S.project!;
+  const [mode, setMode] = useState<"idea" | "script">("idea");
   const [idea, setIdea] = useState(p.brief);
+  const [title, setTitle] = useState("");
+  const [script, setScript] = useState("");
+  const [intent, setIntent] = useState<"as_written" | "adapt">("as_written");
   const [busy, setBusy] = useState(false);
   const cap = agentCap(S.agentCfg);
-  const note = cap.state === "free" ? "Live director calls are off: new conversations use the offline stand-in (simple rules, not an AI model), which can't write a real plan. Drafting needs a live model."
+  const note = cap.state === "free" ? "Live director calls are off: new conversations use the offline stand-in (simple rules, not an AI model), which can't write a real story. Drafting needs a live model."
     : cap.state === "problem" ? `The director needs attention: ${cap.detail}` : cap.state === "ready" ? "Pressing Send in the director makes live model calls. You'll see the request first." : "";
   const draft = async () => {
     setBusy(true);
     try {
       if (idea.trim() !== p.brief.trim()) { await api.patchProject(p.id, { brief: idea.trim() }); await S.reload(); }
-      S.askDirector(`Draft a short-film plan from the brief for my review: a compact treatment and about three shots. Keep what I described separate from your additions, and stop at a draft: don't propose any generation.`);
+      S.askDirector("Help me develop this idea into a short story draft for my review, before any shots: what it explores, what the audience should notice or feel, how it develops, the beats and the ending. Ask me only what you need.");
+    } catch (e) { S.fail(e); } finally { setBusy(false); }
+  };
+  const useScript = async () => {
+    setBusy(true);
+    try {
+      const src = await api.addSource(p.id, title.trim() || "Script", script);
+      S.askDirector(intent === "as_written"
+        ? `I've stored my script “${src.title}”. Break it down as written into a story draft for my review: what it explores, the beats with line references, and the ending. Don't change my words; list any suggestions separately.`
+        : `I've stored my script “${src.title}”. Draft an adaptation for my review: keep my original as it is, write the adapted script separately, and list every change you make.`);
+      setScript("");
     } catch (e) { S.fail(e); } finally { setBusy(false); }
   };
   const addShot = async () => {
@@ -147,15 +167,51 @@ function StartFilm() {
   return (
     <section className="start-film">
       <h2>Start your film</h2>
-      <p className="muted">Describe the idea in a few sentences. The director can turn it into a plan you review before anything is created, or you can add shots yourself.</p>
-      <label className="sr-only" htmlFor="start-idea">Your idea</label>
-      <textarea id="start-idea" rows={4} value={idea} onChange={(e) => setIdea(e.target.value)} placeholder="A boy waits under a concrete flyover at night, absorbed in a phone…" />
-      <div className="row">
-        <button className="primary" disabled={busy || !idea.trim()} onClick={draft}>Draft a plan with the director</button>
-        <button disabled={busy} onClick={addShot}>Add shots myself</button>
+      <div className="segmented" role="group" aria-label="Start from">
+        <button className={mode === "idea" ? "on" : ""} aria-pressed={mode === "idea"} onClick={() => setMode("idea")}>From an idea</button>
+        <button className={mode === "script" ? "on" : ""} aria-pressed={mode === "script"} onClick={() => setMode("script")}>From a script</button>
       </div>
-      <p className="muted small-note">Drafting saves your idea as the project brief and opens the director with a request ready to review. Nothing is sent until you press Send.</p>
+      {mode === "idea" ? (<>
+        <p className="muted">Describe the idea in a few sentences. The director helps you shape it into a story you review and approve before any shots are planned.</p>
+        <label className="sr-only" htmlFor="start-idea">Your idea</label>
+        <textarea id="start-idea" rows={4} value={idea} onChange={(e) => setIdea(e.target.value)} placeholder="What did you see, or imagine? What should the audience feel?" />
+        <div className="row">
+          <button className="primary" disabled={busy || !idea.trim()} onClick={draft}>Develop the story with the director</button>
+          <button disabled={busy} onClick={addShot}>Add shots myself</button>
+        </div>
+        <p className="muted small-note">This saves your idea as the project brief and opens the director with a request ready to review. Nothing is sent until you press Send.</p>
+      </>) : (<>
+        <p className="muted">Paste your script. It is stored exactly as you paste it and is never changed. The director's breakdown is a reading of it; an adaptation is always a separate version.</p>
+        <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Spare Key" /></label>
+        <label className="sr-only" htmlFor="start-script">Your script</label>
+        <textarea id="start-script" className="script-box" rows={10} value={script} onChange={(e) => setScript(e.target.value)} placeholder={"INT. LAUNDROMAT – NIGHT\n\nMAYA (20s) waits by a dryer…"} />
+        <div className="row" role="radiogroup" aria-label="What should the director do">
+          <label className="inline"><input type="radio" checked={intent === "as_written"} onChange={() => setIntent("as_written")} /> Use as written</label>
+          <label className="inline"><input type="radio" checked={intent === "adapt"} onChange={() => setIntent("adapt")} /> Adapt it (a separate version)</label>
+        </div>
+        <div className="row">
+          <button className="primary" disabled={busy || !script.trim()} onClick={useScript}>Store script and ask the director</button>
+          <span className="muted">{script.length.toLocaleString()} / 60,000 characters</span>
+        </div>
+        <p className="muted small-note">The script is stored when you press the button; the director request is prefilled and sent only when you press Send.</p>
+      </>)}
       {note && <div className="note info">{note}</div>}
+    </section>
+  );
+}
+
+function StoryCard() {
+  const S = useStudio();
+  const plan = S.plan!;
+  const st = plan.content.story!;
+  const review = plan.story_review;
+  return (
+    <section className="story-summary" aria-label="Story">
+      <div className="ss-head"><span className="pc-kind">Story</span><StoryStatusChips plan={plan} /><div className="spacer" />
+        <button className="small" onClick={() => S.setPlanOpen(true)}>Open story</button></div>
+      <p className="story-premise">{st.premise}</p>
+      <ol className="beats compact">{st.beats.map((b) => <li key={b.key}>{b.text}</li>)}</ol>
+      {review?.needed && <div className="note warn">The approved story changed after shots were planned. Open the story to review the existing shots against it.</div>}
     </section>
   );
 }

@@ -21,16 +21,19 @@ from .providers.base import ToolCall, ToolOutcome, ToolSpec
 SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
 TOOL_NAMES = ("list", "read", "write", "propose_generation")
 
-LIST_PATHS = "/, /plan/revisions, /decisions, /assets, /assets/{handle}, /scenes, /shots, /shots/{id}/takes, /shots/{id}/proposals, /skills"
-READ_PATHS = ("/, /plan, /plan/revisions/{n}, /preparation, /image-workflow, /decisions, /assets/{handle}, /assets/{handle}/v{n}, /scenes/{id}, /shots/{id}, "
+LIST_PATHS = "/, /plan/revisions, /story/sources, /decisions, /assets, /assets/{handle}, /scenes, /shots, /shots/{id}/takes, /shots/{id}/proposals, /skills"
+READ_PATHS = ("/, /plan, /plan/revisions/{n}, /story/sources/{id}, /preparation, /image-workflow, /decisions, /assets/{handle}, /assets/{handle}/v{n}, /scenes/{id}, /shots/{id}, "
               "/shots/{id}/start_frame, /shots/{id}/takes/{n}, /shots/{id}/proposals/{proposal_id}, /skills/{name}")
 WRITE_PATHS = ("/plan (the whole film plan as patch; needs expected_revision once a plan exists), "
+               "/story/sources ({from_message: 'latest_user' or a message id, title}: the server stores that message's "
+               "text verbatim as a supplied script; you never retype a script), "
                "/shots/{id} (update a draft shot; needs expected_revision), /shots (create), /scenes (create)")
 
 _STR = {"type": "string"}
 PATCH_SCHEMA = {
     "type": "object",
-    "description": "Shots: only the fields to change. /scenes: {name}. /plan: the whole plan.",
+    "description": "Shots: only the fields to change. /scenes: {name}. /plan: the whole plan. "
+                   "/story/sources: {from_message, title}.",
     "properties": {
         "title": _STR, "intention": _STR, "action": {"type": "string", "description": "What we see; timed beats like '0-2s: ...' must fit duration_s."},
         "framing": {"type": "string", "enum": list(PRESETS["framing"]), "description": "Starting framing."},
@@ -56,14 +59,35 @@ PATCH_SCHEMA = {
         "guardrails": {"type": "array", "items": _STR},
         "open_questions": {"type": "array", "items": _STR, "description": "Plan: unresolved choices for the person."},
         "scene": {"type": "object", "properties": {"name": _STR}},
-        "shots": {"type": "array", "description": "Plan: about three shots.", "items": {"type": "object", "properties": {
+        "story": {"type": "object", "description": "Plan: the story, drafted and approved BEFORE shots (see /skills/story-development).",
+                  "properties": {
+                      "premise": _STR, "explores": {"type": "string", "description": "What the film explores."},
+                      "audience": {"type": "string", "description": "What the audience should notice or feel."},
+                      "development": {"type": "string", "description": "How events, discoveries, contrasts or shifts of attention develop it."},
+                      "beats": {"type": "array", "items": {"type": "object", "properties": {
+                          "key": _STR, "text": {"type": "string", "description": "What happens."},
+                          "adds": {"type": "string", "description": "What this beat contributes that others don't."},
+                          "origin": {"type": "string", "enum": ["from_you", "from_source", "added"]},
+                          "source_lines": {"type": "string", "description": "Supplied script line range, e.g. 12-18."}}}},
+                      "ending": _STR, "ending_why": {"type": "string", "description": "Why this ending belongs to this story."},
+                      "duration_target_s": {"type": "integer"}, "form": _STR,
+                      "source": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["idea", "script"]},
+                                 "source_id": _STR, "relation": {"type": "string", "enum": ["as_written", "adapted"]}}},
+                      "script_text": {"type": "string", "description": "A short script you wrote, or an ADAPTATION of a supplied script (never with as_written)."},
+                      "changes_from_source": {"type": "array", "items": _STR, "description": "Adaptation only: every change."},
+                      "self_check": {"type": "object", "properties": {"repetition": _STR, "assumptions": _STR, "ending": _STR}}}},
+        "shots": {"type": "array", "description": "Plan: shots derived from the APPROVED story; omit while the story is a draft.",
+                  "items": {"type": "object", "properties": {
             "key": _STR, "title": _STR, "intention": _STR, "action": _STR, "framing": _STR, "end_framing": _STR,
             "camera_move": _STR, "camera_detail": _STR, "lighting": _STR, "lighting_detail": _STR, "lens_look": _STR,
             "depth_of_field": _STR,
-            "duration_s": {"type": "integer"}, "audio": _STR, "assets": {"type": "array", "items": _STR}}}},
+            "duration_s": {"type": "integer"}, "audio": _STR, "assets": {"type": "array", "items": _STR},
+            "beats": {"type": "array", "items": _STR, "description": "Story beat keys this shot serves (one or more)."},
+            "serves": {"type": "string", "description": "How this shot serves those beats."}}}},
         "assets": {"type": "array", "description": "Plan: assets the shots need.", "items": {"type": "object", "properties": {
             "handle": _STR, "kind": _STR, "name": _STR, "description": _STR, "source": _STR,
             "required": {"type": "boolean"}, "image_prompt": _STR}}},
+        "from_message": {"type": "string", "description": "/story/sources: 'latest_user' or the id of the person's message with the script."},
         "refs": {"type": "array", "description": "Ordered references (Image 1..N), pinned to asset versions.",
                  "items": {"type": "object", "properties": {"asset_version_id": _STR}, "required": ["asset_version_id"]}},
     },
@@ -106,15 +130,19 @@ class ToolRefused(Exception):
 
 
 class AgentTools:
-    def __init__(self, project_id: str, ops: Ops, service: GenerationService, media: MediaStore):
+    def __init__(self, project_id: str, ops: Ops, service: GenerationService, media: MediaStore,
+                 thread_id: str | None = None):
         from ..assetgen import AssetGenerations
         from ..planning import Planning
         self.pid, self.ops, self.service, self.media = project_id, ops, service, media
+        self.thread_id = thread_id                          # copying a pasted script reads only this conversation
         self.planning = Planning(ops.db, ops)
         self.assetgen = AssetGenerations(ops.db, ops, media, service.adapter, service.settings)
         self._routes: list[tuple[str, re.Pattern, Callable[..., Any]]] = [
             ("list", re.compile(r"^/$"), self._list_root),
             ("list", re.compile(r"^/plan/revisions$"), self._list_plan_revisions),
+            ("list", re.compile(r"^/story/sources$"), self._list_sources),
+            ("read", re.compile(r"^/story/sources/(?P<sid>src_\w+)$"), self._read_source),
             ("read", re.compile(r"^/plan$"), self._read_plan),
             ("read", re.compile(r"^/plan/revisions/(?P<n>\d+)$"), self._read_plan_revision),
             ("read", re.compile(r"^/preparation$"), self._read_preparation),
@@ -184,7 +212,7 @@ class AgentTools:
 
     # -- list -----------------------------------------------------------------------------------
     def _list_root(self) -> dict:
-        return {"children": ["/plan", "/preparation", "/decisions", "/assets", "/scenes", "/shots", "/skills"]}
+        return {"children": ["/plan", "/story/sources", "/preparation", "/decisions", "/assets", "/scenes", "/shots", "/skills"]}
 
     # -- plan and preparation (M6) ------------------------------------------------------------
     def _plan(self) -> dict:
@@ -196,8 +224,22 @@ class AgentTools:
     def _read_plan(self) -> dict:
         p = self._plan()
         return {"revision": p["revision"], "status": p["status"], "approved_revision": p["approved_revision"],
-                "content": p["content"], "warnings": {k: [w["message"] for w in v] for k, v in p["warnings"].items()},
+                "story_status": p["story_status"], "story_approved_revision": p["story_approved_revision"],
+                "story_review_needed": p["story_review"]["needed"], "content": p["content"], "warnings": {k: [w["message"] for w in v] for k, v in p["warnings"].items()},
                 "shots_created": {l["item_key"]: l["target_id"] for l in p["links"] if l["kind"] == "shot"}}
+
+    def _list_sources(self) -> dict:
+        return {"sources": [{"id": x["id"], "title": x["title"], "chars": x["chars"], "kind": x["kind"], "created_at": x["created_at"]}
+                            for x in self.planning.sources(self.pid)]}
+
+    def _read_source(self, sid: str) -> dict:
+        src = self.planning.source(sid)
+        if src["project_id"] != self.pid:
+            raise NotFoundError(f"story source {sid} not found")
+        lines = src["text"].split("\n")
+        return {"id": src["id"], "title": src["title"], "kind": src["kind"], "sha256": src["sha256"],
+                "note": "Verbatim and immutable. Refer to lines by number; never alter the author's words.",
+                "numbered": "\n".join(f"{i:>4}  {t}" for i, t in enumerate(lines, 1))}
 
     def _list_plan_revisions(self) -> dict:
         return {"revisions": self._plan()["revisions"]}
@@ -376,11 +418,29 @@ class AgentTools:
             if after["direction_warnings"]:             # accepted, but worth a second look
                 out["warnings"] = [w["message"] for w in after["direction_warnings"]]
             return out
+        if path == "/story/sources":
+            ref = str(patch.get("from_message", "")).strip()
+            if not ref:
+                raise ToolRefused("give from_message: 'latest_user' or the id of the person's message holding the script")
+            if self.thread_id is None:
+                raise ToolRefused("no conversation to copy from")
+            q = ("SELECT id, content FROM agent_messages WHERE thread_id=? AND kind='user' ORDER BY id DESC LIMIT 1"
+                 if ref == "latest_user" else "SELECT id, content FROM agent_messages WHERE thread_id=? AND kind='user' AND id=?")
+            row = self.ops.db.one(q, *((self.thread_id,) if ref == "latest_user" else (self.thread_id, int(ref) if ref.isdigit() else -1)))
+            if not row:
+                raise ToolRefused("that message isn't one of the person's messages in this conversation")
+            src = self.planning.add_source(self.pid, str(patch.get("title", "")), json.loads(row["content"])["text"],
+                                           kind="message", by="user")
+            return {"ok": True, "source_id": src["id"], "chars": src["chars"], "lines": src["lines"],
+                    "next": "Stored verbatim. Read it with read /story/sources/{id}; break it down as written unless the "
+                            "person asks to adapt it."}
         if path == "/plan":
             plan = self.planning.write_plan(self.pid, patch, expected_revision=inp.get("expected_revision"),
                                             author="agent", note=str(inp.get("note", ""))[:500])
-            out = {"ok": True, "plan_revision": plan["revision"], "status": plan["status"],
-                   "next": "A person reviews and approves the plan in the UI. You cannot approve it."}
+            out = {"ok": True, "plan_revision": plan["revision"], "status": plan["status"], "story_status": plan["story_status"],
+                   "next": ("The person reviews the story and approves it in the UI; you cannot approve it. Don't add shots "
+                            "until the story is approved." if plan["story_status"] in ("draft", "changed") else
+                            "A person reviews and approves the plan in the UI. You cannot approve it.")}
             if plan["warnings"]:
                 out["warnings"] = {k: [w["message"] for w in v] for k, v in plan["warnings"].items()}
             return out
