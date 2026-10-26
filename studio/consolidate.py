@@ -32,7 +32,7 @@ TABLE_ORDER = ["projects", "media", "scenes", "assets", "asset_versions", "shots
                "takes", "take_events", "feedback", "decisions", "spend", "agent_threads", "agent_messages",
                "agent_tool_calls", "agent_usage", "agent_billing", "plans", "plan_revisions", "plan_links",
                "asset_requirements", "asset_version_reviews", "asset_version_restrictions", "asset_generations",
-               "story_sources", "story_reviews"]
+               "story_sources", "story_reviews", "director_memories", "memory_events", "memory_usage"]
 NOT_IMPORTED = {"workspace_imports", "workspace_settings", "sqlite_sequence"}
 # Media rows are content-addressed: the same sha256 is the same bytes. When two folders recorded the same file,
 # only these metadata columns may differ; the first-imported row is kept and the duplicate is reported.

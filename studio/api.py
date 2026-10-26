@@ -28,6 +28,7 @@ from .limits import LimitError, Limits
 from .agent.providers.base import ProviderConfigError
 from .agent.store import AgentStore
 from .assetgen import AssetGenerations
+from .memory import Memory
 from .overview import project_overview
 from .services import LocalServices, ready_now
 from .planning import Planning
@@ -139,6 +140,17 @@ class ApproveIn(BaseModel):
 class SourceIn(BaseModel):
     title: str = ""
     text: str
+
+
+class MemoryActionIn(BaseModel):
+    action: str
+    text: str | None = None
+    scope: str | None = None
+    shot_id: str | None = None
+
+
+class MemorySettingsIn(BaseModel):
+    enabled: bool
 
 
 class StoryReviewIn(BaseModel):
@@ -380,6 +392,25 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     def approve_plan(plan_id: str, body: ApproveIn) -> dict:
         # HUMAN-ONLY: the only caller of Planning.approve(). No agent tool wraps it.
         return planning.approve(plan_id, body.expected_revision, by="user")
+
+    # -- director memory (the person manages it here; the director can only add, via write /memory) --------
+    memory = Memory(db, ops)
+
+    @app.get("/api/memory")
+    def list_memory(project_id: str | None = None) -> dict:
+        return {"enabled": memory.enabled(), "items": memory.list(project_id)}
+
+    @app.post("/api/memory/{mid}/action")
+    def memory_action(mid: str, body: MemoryActionIn) -> dict:
+        return memory.act(mid, body.action, "user", **{k: v for k, v in body.model_dump().items() if k != "action" and v is not None})
+
+    @app.put("/api/memory/settings")
+    def memory_settings(body: MemorySettingsIn) -> dict:
+        return {"enabled": memory.set_enabled(body.enabled, "user")}
+
+    @app.get("/api/agent/threads/{tid}/memory-usage")
+    def memory_usage(tid: str) -> list[dict]:
+        return memory.usage(tid)
 
     # -- story stage (HUMAN-ONLY approvals and reviews; no agent tool wraps them) --------------
     @app.post("/api/plans/{plan_id}/approve-story")
@@ -644,7 +675,10 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
 
     @app.post("/api/takes/{tid}/feedback")
     def feedback(tid: str, body: FeedbackIn) -> dict:
-        return ops.add_feedback(tid, body.reason, body.note)
+        take = ops.add_feedback(tid, body.reason, body.note)
+        if take["feedback"]:                     # your note on this take becomes a linked example (no model call)
+            memory.record_feedback_example(take["feedback"][-1]["id"])
+        return ops.get_take(tid)
 
     @app.post("/api/takes/{tid}/review")
     def review(tid: str, body: ReviewIn) -> dict:

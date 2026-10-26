@@ -411,6 +411,51 @@ CREATE TABLE IF NOT EXISTS story_reviews (
 CREATE TRIGGER IF NOT EXISTS story_reviews_immutable BEFORE UPDATE ON story_reviews
 BEGIN SELECT RAISE(ABORT, 'story reviews are append-only'); END;
 
+-- Director memory (docs/DIRECTOR_MEMORY_SPEC.md). Evidence points at existing rows; nothing historical is rewritten.
+CREATE TABLE IF NOT EXISTS director_memories (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('preference','execution_note','example')),
+  scope TEXT NOT NULL CHECK (scope IN ('personal','project','shot')),
+  project_id TEXT REFERENCES projects(id),         -- NULL for personal memories
+  shot_id TEXT,
+  origin_project_id TEXT,                         -- where the evidence came from (also for personal memories)
+  topic TEXT NOT NULL,
+  text TEXT NOT NULL,
+  basis TEXT NOT NULL CHECK (basis IN ('explicit','inferred')),
+  status TEXT NOT NULL CHECK (status IN ('active','tentative','dismissed','forgotten','superseded')),
+  source_kind TEXT NOT NULL CHECK (source_kind IN ('message','feedback','user')),
+  source_ref TEXT,
+  source_quote TEXT NOT NULL DEFAULT '',
+  thread_id TEXT,
+  artifacts TEXT NOT NULL DEFAULT '{}',
+  supersedes TEXT,
+  superseded_by TEXT,
+  requested_scope TEXT,
+  dedupe_key TEXT NOT NULL UNIQUE,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  memory_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  by TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT '{}',
+  at TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS memory_events_append_only BEFORE UPDATE ON memory_events
+BEGIN SELECT RAISE(ABORT, 'memory events are append-only'); END;
+CREATE TABLE IF NOT EXISTS memory_usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id TEXT NOT NULL,
+  message_id INTEGER,                             -- the person's message the context was built for
+  memory_ids TEXT NOT NULL,                       -- JSON list: provided to the director (not proof it was followed)
+  task TEXT NOT NULL,
+  chars INTEGER NOT NULL,
+  at TEXT NOT NULL
+);
+
 -- Limits a person sets in the app's Settings (see studio/limits.py). Per workspace; never imported by consolidation.
 CREATE TABLE IF NOT EXISTS workspace_settings (
   key TEXT PRIMARY KEY,

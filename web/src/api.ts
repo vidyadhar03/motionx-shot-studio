@@ -114,6 +114,12 @@ export type StorySource = { id: string; project_id: string; kind: string; title:
 export type StoryReview = { needed: boolean; state: "none" | "review_needed" | "revision_needed" | "keep" | "revised"; story_revision?: number;
   affected: { shot_id: string; key: string; title: string; beats: string[]; basis_revision: number | null; beat_changes: { beat: string; change: string; was: string; now?: string }[] }[];
   new_beats?: string[]; last_review?: { decision: string; note: string; at: string } | null };
+export type MemoryItem = { id: string; kind: "preference" | "execution_note" | "example"; scope: "personal" | "project" | "shot";
+  project_id: string | null; shot_id: string | null; shot_title?: string | null; origin_project_id: string | null; topic: string; text: string;
+  basis: "explicit" | "inferred"; status: "active" | "tentative" | "dismissed" | "forgotten" | "superseded";
+  source_kind: "message" | "feedback" | "user"; source_ref: string | null; source_quote: string; source_at?: string | null; thread_id: string | null;
+  artifacts: Record<string, any>; supersedes: string | null; superseded_by: string | null; requested_scope: string | null;
+  created_by: string; created_at: string; updated_at: string; provided: { count: number; last: string | null } };
 export type PlanShot = { key: string; title: string; beats?: string[]; serves?: string; intention?: string; action?: string; framing?: string | null;
   end_framing?: string | null; camera_move?: string | null; camera_detail?: string; lighting?: string | null;
   lens_look?: string | null; depth_of_field?: string | null; lighting_detail?: string; duration_s: number; audio?: string;
@@ -217,6 +223,10 @@ export const api = {
   addSource: (pid: string, title: string, text: string) => call<StorySource>("POST", `/api/projects/${pid}/story-sources`, { title, text }),
   sources: (pid: string) => call<StorySource[]>("GET", `/api/projects/${pid}/story-sources`),
   source: (sid: string) => call<StorySource>("GET", `/api/story-sources/${sid}`),
+  memory: (projectId: string | null) => call<{ enabled: boolean; items: MemoryItem[] }>("GET", `/api/memory${projectId ? `?project_id=${projectId}` : ""}`),
+  memoryAction: (id: string, action: string, extra: { text?: string; scope?: string; shot_id?: string } = {}) =>
+    call<MemoryItem>("POST", `/api/memory/${id}/action`, { action, ...extra }),
+  memorySettings: (enabled: boolean) => call<{ enabled: boolean }>("PUT", "/api/memory/settings", { enabled }),
   planDiff: (planId: string, a: number, b: number) => call<Record<string, any>>("GET", `/api/plans/${planId}/diff?a=${a}&b=${b}`),
   preparation: (pid: string) => call<Preparation>("GET", `/api/projects/${pid}/preparation`),
   imageWorkflow: () => call<ImageWorkflow>("GET", "/api/image-workflow"),

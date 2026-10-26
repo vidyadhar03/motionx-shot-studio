@@ -25,6 +25,9 @@ LIST_PATHS = "/, /plan/revisions, /story/sources, /decisions, /assets, /assets/{
 READ_PATHS = ("/, /plan, /plan/revisions/{n}, /story/sources/{id}, /preparation, /image-workflow, /decisions, /assets/{handle}, /assets/{handle}/v{n}, /scenes/{id}, /shots/{id}, "
               "/shots/{id}/start_frame, /shots/{id}/takes/{n}, /shots/{id}/proposals/{proposal_id}, /skills/{name}")
 WRITE_PATHS = ("/plan (the whole film plan as patch; needs expected_revision once a plan exists), "
+               "/memory ({text, kind: preference|execution_note, scope: personal|project|shot, topic, quote: the person's "
+               "exact words, shot_id?, feedback_id?, supersedes?}: remember a reusable preference; the server decides "
+               "whether it is explicit or tentative), "
                "/story/sources ({from_message: 'latest_user' or a message id, title}: the server stores that message's "
                "text verbatim as a supplied script; you never retype a script), "
                "/shots/{id} (update a draft shot; needs expected_revision), /shots (create), /scenes (create)")
@@ -87,6 +90,9 @@ PATCH_SCHEMA = {
         "assets": {"type": "array", "description": "Plan: assets the shots need.", "items": {"type": "object", "properties": {
             "handle": _STR, "kind": _STR, "name": _STR, "description": _STR, "source": _STR,
             "required": {"type": "boolean"}, "image_prompt": _STR}}},
+        "text": _STR, "kind": _STR, "topic": {"type": "string", "enum": ["interaction", "story", "visual", "camera", "sound", "general"]},
+        "quote": {"type": "string", "description": "/memory: the person's exact words this rests on."},
+        "shot_id": _STR, "feedback_id": _STR, "supersedes": {"type": "string", "description": "/memory: id of an older memory this corrects."},
         "from_message": {"type": "string", "description": "/story/sources: 'latest_user' or the id of the person's message with the script."},
         "refs": {"type": "array", "description": "Ordered references (Image 1..N), pinned to asset versions.",
                  "items": {"type": "object", "properties": {"asset_version_id": _STR}, "required": ["asset_version_id"]}},
@@ -418,6 +424,9 @@ class AgentTools:
             if after["direction_warnings"]:             # accepted, but worth a second look
                 out["warnings"] = [w["message"] for w in after["direction_warnings"]]
             return out
+        if path == "/memory":
+            from ..memory import Memory
+            return Memory(self.ops.db, self.ops).record_from_director(self.pid, self.thread_id, patch)
         if path == "/story/sources":
             ref = str(patch.get("from_message", "")).strip()
             if not ref:

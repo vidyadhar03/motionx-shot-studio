@@ -14,6 +14,7 @@ from typing import Callable
 from ..config import Settings
 from ..generation import GenerationService
 from ..limits import Limits
+from ..memory import Memory
 from ..media import MediaStore
 from ..ops import Ops
 from . import pricing
@@ -43,6 +44,13 @@ For a new film, develop and agree the story (/skills/story-development) before d
 person asks to skip it. Never alter a supplied script: store it, break it down as written, and offer changes
 separately (an adaptation is a separate, listed version). Every write needs the shot's current revision; if a write is refused, read again and adjust. If a tool refusal or
 limit changed your plan, say so plainly. Finish by telling the person what you changed and what awaits approval.
+
+Memory: when the person states a clear, reusable preference ("keep replies short", "no music in this film") or says
+the model failed to do something it was asked, record it with write /memory, quoting their exact words. Default
+creative notes to this film or the shot; use scope personal only when they say it applies to all their work. Never
+infer taste from approvals, rejections or selections (a rejected static shot doesn't mean they dislike static shots;
+a selected take doesn't mean they liked every detail). A model failure is an execution_note, not a preference. To
+correct an earlier memory, pass supersedes with its id. Don't mention memory in replies.
 
 How to write replies (the person is a filmmaker, reading in a narrow chat panel):
 - Plain filmmaking language. Normally one short paragraph or a few bullets: what you changed, and what needs their
@@ -87,6 +95,7 @@ class AgentRunner:
                  store: AgentStore, provider_factory: Callable[[str, str], Provider] | None = None):
         self.settings, self.ops, self.service, self.media, self.store = settings, ops, service, media, store
         self.limits = Limits(store.db, settings)
+        self.memory = Memory(store.db, ops)
         self._active: dict[str, threading.Event] = {}       # conversations with a message in flight -> cancel flag
         self._active_lock = threading.Lock()
         self._factory = provider_factory or (lambda p, m: make_provider(settings, p, m))
@@ -147,9 +156,13 @@ class AgentRunner:
             self._check_live_allowed(provider, thread_id)          # before ANY network call, incl. verification
             provider.verify()
         tools = AgentTools(thread["project_id"], self.ops, self.service, self.media, thread_id)
-        system = self.system_prompt(thread["project_id"], focus_shot_id)
+        mem_text, mem_ids, mem_task = self.memory.context(thread["project_id"], focus_shot_id, text)
+        system = self.system_prompt(thread["project_id"], focus_shot_id) + (f"\n\n{mem_text}" if mem_text else "")
         self.store.append(thread_id, "user", {"text": text, "focus_shot_id": focus_shot_id,
                                               **({"client_id": client_id} if client_id else {})})
+        if mem_task != "off":                                   # what was PROVIDED to the director (not proof it was followed)
+            last = self.store.db.one("SELECT id FROM agent_messages WHERE thread_id=? AND kind='user' ORDER BY id DESC LIMIT 1", thread_id)
+            self.memory.record_usage(thread_id, last["id"] if last else None, mem_ids, mem_task, len(mem_text))
         self.store.append_items(thread_id, provider.user_items(text))
         history = self.store.provider_items(thread_id)
         stop = "end"

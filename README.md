@@ -136,6 +136,24 @@ needs review, list the affected shots and changed beats, and wait for your expli
 Projects planned before the story stage (like the flyover film) work exactly as before, with no new gates. "Add shots
 myself" still skips all of this. Details: [docs/STORY_DEVELOPMENT_SPEC.md](docs/STORY_DEVELOPMENT_SPEC.md).
 
+## What the director remembers
+
+The director can learn preferences you state, so you don't repeat them in every conversation
+([docs/DIRECTOR_MEMORY_SPEC.md](docs/DIRECTOR_MEMORY_SPEC.md)):
+
+- **Explicit vs tentative is decided by the app, not the model:** a memory is *explicit* only if it quotes your own
+  latest message exactly; anything else is a *tentative* guess until you confirm it. Repetition never confirms it.
+- **Scope:** creative notes stay with the film (or the shot); only statements like "in all my films" or how you like
+  to work with the director ("keep replies short") apply across projects.
+- **Feedback** you add to a take is kept as an example linked to that take, not a general rule. Approving or selecting
+  a take is never treated as taste. Model failures ("it ignored the posture") are kept as execution notes, not taste.
+- **Retrieval:** a few relevant items (≤ 12, about 400 tokens) go with each message you send; story work doesn't get
+  camera notes. Each turn records what was *provided to the director*, which isn't proof it was followed.
+- **You manage it:** Director menu (⋯) → *What the director remembers*: correct, change scope, confirm or dismiss a
+  guess, forget, or switch personalization off. Forgetting doesn't delete the original chat or feedback. Memory never
+  approves anything, changes limits or edits locked shots. Learning starts with new conversations; existing history
+  isn't processed, and opening the app makes no calls.
+
 ## What you can do
 
 - **Projects:** a brief and direction (tone, era, palette, notes) that go into every prompt.

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentCall, AgentThread, api, Asset, AssetGen, Shot, ThreadView } from "./api";
 import { orderedShots, shotStatus, threadSendState } from "./derive";
 import Markdown from "./Markdown";
+import MemoryDialog from "./memory/MemoryDialog";
 import { ImageProposalCard, imageStatus, VideoProposalCard, videoStatus } from "./ProposalCards";
 import { useStudio } from "./store";
 import { fmtDate, fmtDateTime, Menu, MenuItem, Pill } from "./ui";
@@ -11,7 +12,7 @@ const prettyModel = (m: string) => m.replace(/^gemini-/, "").replace(/^claude-/,
 const providerLabel = (t: { provider: string; model: string }) => (t.provider === "scripted" || t.provider === "replay" ? PROVIDER_NAME[t.provider] : `${PROVIDER_NAME[t.provider] ?? t.provider} ${prettyModel(t.model)}`);
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
-type Block = { key: string; msg?: ThreadView["messages"][number]; calls?: AgentCall[]; proposal?: { call: AgentCall; changes: string[] }; story?: AgentCall };
+type Block = { key: string; msg?: ThreadView["messages"][number]; calls?: AgentCall[]; proposal?: { call: AgentCall; changes: string[] }; story?: AgentCall; memory?: AgentCall };
 type Live = { shots: Map<string, Shot>; gens: AssetGen[]; assets: Asset[] };
 
 /** The conversation with the director: the primary way to work on a shot. It lives in the shared right-hand slot,
@@ -68,6 +69,7 @@ export default function Director({ onClose }: { onClose: () => void }) {
   const blocked = send_?.kind === "live_locked";
 
   const [note, setNote] = useState<string | null>(null);
+  const [memOpen, setMemOpen] = useState(false);
   const sendNow = async (msg: string, id: string, fromComposer: boolean) => {
     setBusy(true); setNote(null);
     try {
@@ -130,6 +132,9 @@ export default function Director({ onClose }: { onClose: () => void }) {
       if (e.msg) { if (e.msg.kind === "user") writes = []; out.push({ key: e.key, msg: e.msg }); continue; }
       const c = e.call!;
       if (c.name === "write" && !c.result?.is_error) writes.push(c);
+      if (c.name === "write" && c.input.path === "/memory" && !c.result?.is_error) {
+        out.push({ key: e.key, memory: c }); continue;
+      }
       if (c.name === "write" && c.input.path === "/plan" && !c.result?.is_error && c.input.patch?.story) {
         out.push({ key: e.key, story: c }); continue;
       }
@@ -162,6 +167,7 @@ export default function Director({ onClose }: { onClose: () => void }) {
         <div className="spacer" />
         <Menu label="⋯" aria-label="Conversation menu">{(close) => (<>
           <MenuItem onClick={() => { close(); newThread(); }}>New conversation</MenuItem>
+          <MenuItem onClick={() => { close(); setMemOpen(true); }}>What the director remembers</MenuItem>
           {threads.length > 0 && <div className="menu-label">Conversations</div>}
           {threads.map((t, i) => <MenuItem key={t.id} onClick={() => { close(); open(t.id); }}>
             {t.id === thread?.id ? "✓ " : ""}{i === 0 ? "Latest" : "Earlier"} · {fmtDateTime(t.created_at)} · {providerLabel(t)}</MenuItem>)}
@@ -178,6 +184,7 @@ export default function Director({ onClose }: { onClose: () => void }) {
         {loaded && !blocks.length && !(focus?.selected_take_id && focus.locked) && <p className="muted dir-hint">{focus ? `Tell me what to change in ${focusLabel}, or ask me to apply its feedback. I'll prepare a proposal for you to approve.` : "Ask me to draft a film plan, prepare assets, or revise a shot. I can prepare proposals, but only you can approve them."}</p>}
         {blocks.map((b) => b.msg ? <Message key={b.key} m={b.msg} historical={b.msg.at < sessionStart.current} />
           : b.story ? <StoryChatCard key={b.key} call={b.story} S={S} />
+          : b.memory ? <MemoryNotice key={b.key} call={b.memory} />
           : b.proposal ? <ProposalFor key={b.key} call={b.proposal.call} changes={b.proposal.changes} live={live} S={S} onChanged={changed} />
           : <Actions key={b.key} calls={b.calls!} />)}
         {history.length > 0 && focusShot && S.status && (
@@ -205,7 +212,25 @@ export default function Director({ onClose }: { onClose: () => void }) {
           {blocked && <div className="reason">{send_!.text} {view && <button className="small" onClick={newThread}>New conversation</button>}</div>}
         </div>
       )}
+      {memOpen && <MemoryDialog onClose={() => setMemOpen(false)} />}
     </section>
+  );
+}
+
+/** A small, non-blocking notice for something the director just remembered, with Undo. The reply itself stays quiet. */
+function MemoryNotice({ call }: { call: AgentCall }) {
+  const S = useStudio();
+  const c = call.result?.content ?? {};
+  const [state, setState] = useState<"shown" | "undone">("shown");
+  if (!c.ok || c.duplicate) return null;
+  const text = String(call.input.patch?.text ?? "");
+  const where = c.scope === "personal" ? "all your films" : c.scope === "shot" ? "this shot" : "this film";
+  return (
+    <div className="mem-notice" role="status">
+      {state === "undone" ? <span className="muted">Forgotten: “{text}”.</span> : <>
+        <span>{c.status === "active" ? "Remembered" : "Noted as a guess"}: “{text}” <span className="muted">({where}{c.status === "tentative" ? ", tentative until you confirm" : ""})</span></span>
+        <button className="link" onClick={() => api.memoryAction(String(c.memory_id), "undo").then(() => setState("undone")).catch(S.fail)}>Undo</button></>}
+    </div>
   );
 }
 
