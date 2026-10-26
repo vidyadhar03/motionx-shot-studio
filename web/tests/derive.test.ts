@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { agentCap, approveBlock, cardTake, defaultTake, imageCap, newConversationLabel, nextAction, orderedShots, shotStatus, spendSummary, takeKind, threadSendState, videoCap } from "../src/derive.ts";
+import { agentCap, approveBlock, cardTake, defaultTake, imageCap, newConversationLabel, groupByScene, nextAction, orderedShots, shotStatus, spendSummary, takeKind, threadSendState, videoCap } from "../src/derive.ts";
 
 const take = (n: number, over: Record<string, unknown> = {}) => ({ id: `t${n}`, number: n, state: "succeeded", review: "unreviewed", output_sha: `sha${n}`,
   adapter: "comfy", is_paid: 1, parent_take_id: null, created_at: "", finished_at: null, ...over }) as any;
@@ -152,4 +152,13 @@ test("story stage: next step asks for the story before shots, then the shot plan
   const s = shot("s1", 1, { takes: [take(1)], selected_take_id: "t1" });
   assert.equal(nextAction([s], { status: "approved", revision: 3, approved_revision: 3, story_status: "approved", story_review: true, story_shots: 1 }, []).kind, "story");
   assert.equal(nextAction([s], { status: "approved", revision: 3, approved_revision: 3, story_status: "none" }, []).kind, "export");   // legacy: no gate
+});
+
+test("board grouping: scenes in project order, every shot appears exactly once, unassigned and stale-scene shots land last", () => {
+  const scenes = [{ id: "sc1", name: "One" }, { id: "sc2", name: "Two" }, { id: "sc3", name: "Empty" }] as any;
+  const shots = [shot("x", 1), shot("a2", 2, { scene_id: "sc1" }), shot("b1", 1, { scene_id: "sc2" }), shot("a1", 1, { scene_id: "sc1" }), shot("gone", 2, { scene_id: "deleted" })];
+  const g = groupByScene(shots, scenes);
+  assert.deepEqual(g.map((x) => x.scene?.id ?? null), ["sc1", "sc2", "sc3", null]);
+  assert.deepEqual(g.map((x) => x.shots.map((s: any) => s.id)), [["a1", "a2"], ["b1"], [], ["gone", "x"]]);
+  assert.equal(g.reduce((n, x) => n + x.shots.length, 0), shots.length);
 });

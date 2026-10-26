@@ -72,6 +72,15 @@ export function orderedShots<T extends { scene_id: string | null; order_idx: num
     || a.order_idx - b.order_idx);
 }
 
+/** Scenes in project order, each with its shots; shots with no scene (or an unknown one) land in a final `scene: null` group, so none is lost. */
+export function groupByScene<T extends { scene_id: string | null; order_idx: number }>(shots: T[], scenes: Scene[]): { scene: Scene | null; shots: T[] }[] {
+  const ordered = orderedShots(shots, scenes);
+  return [
+    ...scenes.map((scene) => ({ scene: scene as Scene | null, shots: ordered.filter((s) => s.scene_id === scene.id) })),
+    { scene: null, shots: ordered.filter((s) => !s.scene_id || !scenes.some((sc) => sc.id === s.scene_id)) },
+  ];
+}
+
 // -- next action -----------------------------------------------------------------------------------
 
 export type NextAction = {

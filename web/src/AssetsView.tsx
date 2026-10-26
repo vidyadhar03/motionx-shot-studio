@@ -75,7 +75,8 @@ export default function AssetsView() {
           const r = READY[i.status];
           return (
             <button key={i.handle} className={`asset-card ${sel?.handle === i.handle ? "on" : ""}`} aria-pressed={sel?.handle === i.handle} onClick={() => open(i.handle)}>
-              <span className={`ac-img ${i.kind}`}>{i.current ? <img src={media(i.current.media_sha)} alt="" loading="lazy" /> : <span className="ac-none">No image yet</span>}</span>
+              <span className={`ac-img ${i.kind}`} style={i.current ? ({ "--bg": `url(${media(i.current.media_sha)})` } as React.CSSProperties) : undefined}>
+                {i.current ? <img src={media(i.current.media_sha)} alt="" loading="lazy" /> : <span className="ac-none">No image yet</span>}</span>
               <span className="ac-body">
                 <span className="ac-title"><b>{i.name}</b><span className="muted">@{i.handle}</span></span>
                 <span className="ac-meta"><span className="muted">{i.kind}</span><span className="muted">{i.current ? `v${i.current.version} chosen` : "none chosen"}</span></span>

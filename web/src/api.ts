@@ -88,7 +88,7 @@ export type OverviewTake = { id: string; number: number; state: string; review: 
                              adapter: string; is_paid: number; parent_take_id: string | null; created_at: string; finished_at: string | null };
 export type OpenProposal = { id: string; status: "pending" | "stale"; est_credits: number; is_paid: number; created_by: string;
                              created_at: string; stale_reason: string | null; shot_revision: number };
-export type OverviewShot = { id: string; title: string; scene_id: string | null; order_idx: number; mode: string; locked: boolean;
+export type OverviewShot = { id: string; title: string; scene_id: string | null; order_idx: number; mode: string; intention?: string; locked: boolean;
                              revision: number; duration_s: number; selected_take_id: string | null; takes: OverviewTake[];
                              open_proposal: OpenProposal | null; blockers: string[] };
 export type Overview = { project_id: string; shots: OverviewShot[] };
@@ -96,7 +96,7 @@ export type PlanRevisionDoc = { plan_id: string; revision: number; author: strin
 
 export type ExportPreview = {
   manifest_version: string;
-  included: { scene: { name: string } | null; shot: { id: string; title: string }; take: number; file: string; cost: string }[];
+  included: { scene: { name: string } | null; shot: { id: string; title: string }; take: number; file: string; cost: string; sha?: string; bytes?: number; review?: string }[];
   missing: { scene: { name: string } | null; shot: { id: string; title: string }; reason: string }[];
 };
 export type CancelResult = { result: string; message: string; take: Take };

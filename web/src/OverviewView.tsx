@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, Decision, Direction, media, OverviewShot, PlanContent } from "./api";
-import { agentCap, cardTake, nextAction, orderedShots, shotStatus } from "./derive";
+import { agentCap, nextAction, orderedShots } from "./derive";
 import { useGuard } from "./guard";
+import { Card } from "./Board";
 import { StoryStatusChips } from "./story/StoryView";
 import { useStudio } from "./store";
-import { fmtDate, Pill, SaveState, SaveStatus, VideoThumb } from "./ui";
+import { fmtDate, Pill, SaveState, SaveStatus } from "./ui";
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n).replace(/\s+\S*$/, "")}…` : s);
 
@@ -44,7 +45,6 @@ export default function OverviewView() {
           <h1>{project.name}</h1>
           {synopsis && !empty && <p className="synopsis">{clip(synopsis, 320)}</p>}
         </div>
-        {plan?.content.story && <div className="plan-state"><StoryStatusChips plan={plan} /><button className="small" onClick={() => setPlanOpen(true)}>Open story</button></div>}
         {plan && !plan.content.story && (
           <div className="plan-state">
             {plan.approved_revision
@@ -55,13 +55,14 @@ export default function OverviewView() {
           </div>)}
       </section>
 
-      {plan?.content.story && <StoryCard />}
+      {plan?.content.story && <StoryCard next={next.kind === "story" ? next : null} onNext={doNext} />}
       {empty ? <StartFilm /> : (
         <>
-          <section className={`next ${next.kind}`} aria-label="Next step">
-            <div><div className="next-kicker">Next</div><h2>{next.title}</h2><p>{next.detail}</p></div>
-            <button className="primary" onClick={doNext}>{next.cta}</button>
-          </section>
+          {next.kind !== "story" && (
+            <section className={`next ${next.kind}`} aria-label="Next step">
+              <div><div className="next-kicker">Next</div><h2>{next.title}</h2><p>{next.detail}</p></div>
+              <button className="primary" onClick={doNext}>{next.cta}</button>
+            </section>)}
 
           {!(plan?.content.story && !ordered.length) && <>
           <section className="progress-row" aria-label="Progress">
@@ -79,7 +80,7 @@ export default function OverviewView() {
           </section>
 
           <section aria-label="Shots">
-            <div className="sec-head"><h2>Shots</h2><button className="small" onClick={() => S.go({ section: "shots" })}>Open Shots →</button></div>
+            <div className="sec-head"><h2>Shots by scene</h2><button className="small" onClick={() => S.go({ section: "shots", item: "board" })}>Open the Board →</button></div>
             <ShotCards shots={ordered} num={num} sceneName={(id) => project.scenes.find((s) => s.id === id)?.name ?? null} onOpen={(id) => S.go({ section: "shots", item: id })} />
           </section>
           </>}
@@ -107,26 +108,8 @@ function ShotCards({ shots, num, sceneName, onOpen }: { shots: OverviewShot[]; n
       {groups.map((g, gi) => (
         <div key={gi} className="card-group">
           {g.scene && sceneName(g.scene) && <div className="card-scene">{sceneName(g.scene)}</div>}
-          <div className="shot-cards">
-            {g.shots.map((s) => {
-              const c = cardTake(s), st = shotStatus(s);
-              return (
-                <button key={s.id} className={`shot-card ${st.key}`} onClick={() => onOpen(s.id)}>
-                  <span className="sc-media">
-                    {c.take ? <VideoThumb sha={c.take.output_sha!} />
-                      : <span className="sc-ph">{st.key === "working" ? <><i className="spin big" />Generating…</> : st.key === "blocked" ? "Waiting on an asset" : st.key === "proposal" ? "Nothing generated yet" : st.key === "stale" ? "Nothing generated yet" : "Nothing generated yet"}</span>}
-                    <span className={`sc-badge ${st.tone}`}>{st.label}</span>
-                    {c.why === "latest" && <span className="sc-note">latest take shown</span>}
-                    {s.locked && <span className="sc-lock" title="Locked from the director">🔒</span>}
-                  </span>
-                  <span className="sc-body"><b>{num.get(s.id)}. {s.title || "Untitled shot"}</b>
-                    <span className="muted">{s.takes.length} take{s.takes.length === 1 ? "" : "s"} · {s.duration_s}s</span></span>
-                  {s.blockers.length > 0 && !s.takes.length && <span className="sc-block">{s.blockers[0]}</span>}
-                </button>);
-            })}
-          </div>
-        </div>
-      ))}
+          <div className="board-grid">{g.shots.map((s) => <Card key={s.id} s={s} n={num.get(s.id)!} onOpen={() => onOpen(s.id)} />)}</div>
+        </div>))}
     </>
   );
 }
@@ -182,9 +165,9 @@ function StartFilm() {
         <p className="muted small-note">This saves your idea as the project brief and opens the director with a request ready to review. Nothing is sent until you press Send.</p>
       </>) : (<>
         <p className="muted">Paste your script. It is stored exactly as you paste it and is never changed. The director's breakdown is a reading of it; an adaptation is always a separate version.</p>
-        <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Spare Key" /></label>
+        <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Untitled script" /></label>
         <label className="sr-only" htmlFor="start-script">Your script</label>
-        <textarea id="start-script" className="script-box" rows={10} value={script} onChange={(e) => setScript(e.target.value)} placeholder={"INT. LAUNDROMAT – NIGHT\n\nMAYA (20s) waits by a dryer…"} />
+        <textarea id="start-script" className="script-box" rows={10} value={script} onChange={(e) => setScript(e.target.value)} placeholder={"INT. KITCHEN – MORNING\n\nA kettle clicks off…"} />
         <div className="row" role="radiogroup" aria-label="What should the director do">
           <label className="inline"><input type="radio" checked={intent === "as_written"} onChange={() => setIntent("as_written")} /> Use as written</label>
           <label className="inline"><input type="radio" checked={intent === "adapt"} onChange={() => setIntent("adapt")} /> Adapt it (a separate version)</label>
@@ -200,7 +183,7 @@ function StartFilm() {
   );
 }
 
-function StoryCard() {
+function StoryCard({ next, onNext }: { next: import("./derive").NextAction | null; onNext: () => void }) {
   const S = useStudio();
   const plan = S.plan!;
   const st = plan.content.story!;
@@ -208,10 +191,11 @@ function StoryCard() {
   return (
     <section className="story-summary" aria-label="Story">
       <div className="ss-head"><span className="pc-kind">Story</span><StoryStatusChips plan={plan} /><div className="spacer" />
-        <button className="small" onClick={() => S.setPlanOpen(true)}>Open story</button></div>
+        {!next && <button className="small" onClick={() => S.setPlanOpen(true)}>Open story</button>}</div>
       <p className="story-premise">{st.premise}</p>
       <ol className="beats compact">{st.beats.map((b) => <li key={b.key}>{b.text}</li>)}</ol>
-      {review?.needed && <div className="note warn">The approved story changed after shots were planned. Open the story to review the existing shots against it.</div>}
+      {next && <div className="ss-next"><div><strong>{next.title}</strong><div className="muted">{next.detail}</div></div><button className="primary" onClick={onNext}>{next.cta}</button></div>}
+      {review?.needed && !next && <div className="note warn">The approved story changed after shots were planned. Open the story to review the existing shots against it.</div>}
     </section>
   );
 }

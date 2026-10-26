@@ -104,7 +104,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   // A shot or asset that no longer exists falls back quietly (with a note) instead of showing an error.
   useEffect(() => {
     if (!overview || !route.item) return;
-    if (route.section === "shots" && !overview.shots.some((s) => s.id === route.item)) {
+    if (route.section === "shots" && route.item !== "board" && !overview.shots.some((s) => s.id === route.item)) {
       setNotes((n) => [...n, "That shot is no longer in this project, so the first shot was opened instead."]);
       setRoute((r) => ({ ...r, item: null }));
     }

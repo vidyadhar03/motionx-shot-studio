@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, media, Shot, Take } from "./api";
 import { ACTIVE_STATES, approveBlock, cardTake, defaultTake, orderedShots, playable, shotStatus, takeKind } from "./derive";
 import { useDialogs } from "./dialogs";
+import Board, { lastShot } from "./Board";
 import { useGuard } from "./guard";
 import { SidePortal, useLayout, useSide } from "./layout";
 import { useStudio } from "./store";
@@ -16,7 +17,13 @@ type Tab = "direction" | "proposal" | "details";
 type Panel = "chat" | Tab;
 type Msg = { kind: "ok" | "warn"; text: string } | null;
 
+/** Shots: the Board (every shot at a glance, grouped by scene) or one shot's workspace (player + director). */
 export default function ShotsView() {
+  const S = useStudio();
+  return S.item === "board" ? <Board /> : <ShotWorkspace />;
+}
+
+function ShotWorkspace() {
   const S = useStudio();
   const { project, overview, assets, presets, status, fail, reload } = S;
   const dialogs = useDialogs();
@@ -26,6 +33,7 @@ export default function ShotsView() {
   const shotId = (S.item && ordered.some((s) => s.id === S.item) ? S.item : ordered[0]?.id) ?? null;
   useEffect(() => { if (shotId && S.item !== shotId) S.setItemQuiet(shotId); }, [shotId]);          // eslint-disable-line react-hooks/exhaustive-deps
   const ov = ordered.find((s) => s.id === shotId) ?? null;
+  useEffect(() => { if (shotId) lastShot.id = shotId; }, [shotId]);
 
   const [shot, setShot] = useState<Shot | null>(null);
   const sig = ov ? JSON.stringify([ov.revision, ov.selected_take_id, ov.locked, ov.takes.map((t) => [t.id, t.state, t.review, t.output_sha]), ov.open_proposal?.id, ov.open_proposal?.status]) : "";
@@ -132,11 +140,12 @@ export default function ShotsView() {
   return (
     <>
       <ShotStrip ordered={ordered} current={shotId} scenes={project.scenes} onOpen={(id) => S.go({ section: "shots", item: id })}
-                 onNewShot={createShot} onNewScene={createScene} />
+                 onNewShot={createShot} onNewScene={createScene} onBoard={() => S.go({ section: "shots", item: "board" })} />
       {!cur && <div className="loading">Loading shot…</div>}
       {cur && !cmp && (
         <div className="stage">
           <div className="stage-head">
+            <button className="back-board" onClick={() => S.go({ section: "shots", item: "board" })} aria-label="Back to the Board">← Board</button>
             <h1 title={cur.title}>{cur.title || "Untitled shot"}</h1>
             <Pill tone={shotStatus(ov!).tone}>{shotStatus(ov!).label}</Pill>
             {cur.locked ? <button className="small lockbtn on" onClick={toggleLock} title="A locked shot can't be edited by the director. Click to unlock.">🔒 Locked · Unlock</button>
@@ -194,7 +203,7 @@ export default function ShotsView() {
         </div>
       )}
       {cur && cmp && (
-        <CompareView cur={cur} cmp={cmp} setCmp={setCmp} busy={busy} onChoose={approveSelect} msg={msg} showDir={cmpDirector} onToggleDir={() => { setCmpDirector(!cmpDirector); if (!cmpDirector) S.setDirectorOpen(true); }} />
+        <CompareView cur={cur} cmp={cmp} setCmp={setCmp} busy={busy} onChoose={approveSelect} onFeedback={(t) => { setPick(t.id); setCmp(null); setFeedbackOpen(true); }} msg={msg} showDir={cmpDirector} onToggleDir={() => { setCmpDirector(!cmpDirector); if (!cmpDirector) S.setDirectorOpen(true); }} />
       )}
 
       <SidePortal>
@@ -227,15 +236,16 @@ export default function ShotsView() {
 
 // ------------------------------------------------------------------------------------------------------
 
-function ShotStrip({ ordered, current, scenes, onOpen, onNewShot, onNewScene }: {
+function ShotStrip({ ordered, current, scenes, onOpen, onNewShot, onNewScene, onBoard }: {
   ordered: ReturnType<typeof orderedShots<import("./api").OverviewShot>>; current: string | null; scenes: import("./api").Scene[];
-  onOpen: (id: string) => void; onNewShot: (scene: string | null) => void; onNewScene: () => void;
+  onOpen: (id: string) => void; onNewShot: (scene: string | null) => void; onNewScene: () => void; onBoard: () => void;
 }) {
   const groups = [...scenes.map((s) => ({ id: s.id as string | null, name: s.name })), { id: null as string | null, name: "No scene" }]
     .map((g) => ({ ...g, shots: ordered.filter((s) => (s.scene_id ?? null) === g.id) })).filter((g) => g.shots.length || (g.id && true));
   const number = new Map(ordered.map((s, i) => [s.id, i + 1]));
   return (
     <nav className="shot-strip" aria-label="Shots">
+      <button className="board-btn" onClick={onBoard} title="See every shot, grouped by scene">▦ Board</button>
       {groups.map((g) => (
         <div className="strip-group" key={g.id ?? "none"}>
           {(scenes.length > 0) && <div className="strip-scene" title={g.name}>{g.name}</div>}
@@ -383,8 +393,8 @@ function TakeStrip({ takes, selectedId, viewedId, onView, onNew }: {
   );
 }
 
-function CompareView({ cur, cmp, setCmp, busy, onChoose, msg, showDir, onToggleDir }: {
-  showDir: boolean; onToggleDir: () => void; cur: Shot; cmp: { a: string; b: string }; setCmp: (c: { a: string; b: string } | null) => void; busy: boolean; onChoose: (t: Take) => void; msg: Msg;
+function CompareView({ cur, cmp, setCmp, busy, onChoose, onFeedback, msg, showDir, onToggleDir }: {
+  onFeedback: (t: Take) => void; showDir: boolean; onToggleDir: () => void; cur: Shot; cmp: { a: string; b: string }; setCmp: (c: { a: string; b: string } | null) => void; busy: boolean; onChoose: (t: Take) => void; msg: Msg;
 }) {
   const ready = cur.takes.filter(playable).sort((a, b) => a.number - b.number);
   const refs = useRef<(HTMLVideoElement | null)[]>([]);
@@ -398,12 +408,17 @@ function CompareView({ cur, cmp, setCmp, busy, onChoose, msg, showDir, onToggleD
     const t = ready.find((x) => x.id === id);
     return (
       <section className="cmp-side" aria-label={which === "a" ? "Left take" : "Right take"}>
-        <label className="cmp-pick">{which === "a" ? "Left" : "Right"} take
-          <select value={id} onChange={(e) => setCmp({ ...cmp, [which]: e.target.value })}>
-            {ready.map((x) => <option key={x.id} value={x.id}>Take {x.number}{x.id === cur.selected_take_id ? " (selected)" : ""}{x.review !== "unreviewed" ? ` · ${x.review}` : ""}</option>)}
-          </select></label>
+        <div className="cmp-top">
+          <b className="cmp-label">Take {t?.number ?? "?"}</b>
+          {t && (t.id === cur.selected_take_id ? <Pill tone="accent">✓ Selected</Pill> : t.review === "approved" ? <Pill tone="ok">Approved</Pill> : t.review === "rejected" ? <Pill tone="bad">Rejected</Pill> : <Pill tone="info">Needs review</Pill>)}
+          <label className="cmp-pick">Change
+            <select aria-label={`${which === "a" ? "Left" : "Right"} take`} value={id} onChange={(e) => setCmp({ ...cmp, [which]: e.target.value })}>
+              {ready.map((x) => <option key={x.id} value={x.id}>Take {x.number}{x.id === cur.selected_take_id ? " (selected)" : ""}{x.review !== "unreviewed" ? ` · ${x.review}` : ""}</option>)}
+            </select></label>
+        </div>
         {t && <video ref={(el) => { refs.current[i] = el; }} key={t.id} className="cmp-video" src={`/api/media/${t.output_sha}`} controls loop playsInline preload="metadata" muted={i === 0} aria-label={`Take ${t.number}`} />}
-        {t && <div className="cmp-foot">{t.id === cur.selected_take_id ? <Pill tone="accent">✓ Selected</Pill> : t.review === "approved" ? <Pill tone="ok">Approved</Pill> : t.review === "rejected" ? <Pill tone="bad">Rejected</Pill> : <Pill tone="info">Needs review</Pill>}
+        {t && <div className="cmp-foot">
+          <button className="small" onClick={() => onFeedback(t)}>Feedback{t.feedback.length ? ` (${t.feedback.length})` : ""}</button>
           {t.id !== cur.selected_take_id && t.review !== "rejected" && <button className="small btn-review" disabled={busy} onClick={() => onChoose(t)}>Approve &amp; select take {t.number}</button>}</div>}
       </section>
     );

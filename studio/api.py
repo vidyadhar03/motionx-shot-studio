@@ -355,7 +355,8 @@ def create_app(settings: Settings | None = None, *, adapter: Adapter | None = No
     def export_preview(pid: str) -> dict:
         m = exporter.plan(pid)
         return {"included": [{"scene": i["scene"], "shot": i["shot"], "take": i["take"]["number"],
-                              "file": i["file"]["path"], "cost": i["cost"]["certainty"]} for i in m["items"]],
+                              "file": i["file"]["path"], "cost": i["cost"]["certainty"],
+                              "sha": i["file"]["sha256"], "bytes": i["file"]["bytes"], "review": i["take"]["review"]} for i in m["items"]],
                 "missing": m["missing"], "manifest_version": m["manifest_version"]}
 
     @app.get("/api/projects/{pid}/export.zip")
