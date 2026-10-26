@@ -569,3 +569,19 @@ label.inline { white-space: nowrap; font-size: 14px; color: var(--text); }
 .bc-body { gap: 4px; padding: 13px 16px 14px; }
 .bs-head { margin-bottom: 12px; }
 .board-grid { gap: 20px; }
+
+/* Proposal changes in filmmaking words; raw fields live in the details */
+.pc-changes { list-style: none; padding: 0; margin: 2px 0 0; display: grid; gap: 4px; }
+.pc-changes li { display: grid; grid-template-columns: 78px 1fr; gap: 10px; font-size: 13px; color: #d4d6db; line-height: 1.45; }
+.pc-ch-label { color: var(--muted2); font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; padding-top: 2px; }
+.pc-raw { width: 100%; border-collapse: collapse; margin: 8px 0 10px; font-size: 12px; color: #c4c7ce; }
+.pc-raw caption { text-align: left; color: var(--muted2); font-size: 11.5px; padding-bottom: 4px; }
+.pc-raw th { text-align: left; font-weight: 500; color: var(--muted2); padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.pc-raw td { padding: 5px 6px; vertical-align: top; border-bottom: 1px solid rgba(255,255,255,.04); overflow-wrap: anywhere; }
+.pc-raw code { font-size: 11.5px; color: #e3c48a; }
+
+/* A director reply whose proposal has since been completed, dismissed or gone out of date: kept as written, marked */
+.msg.assistant.settled { border-left: 2px solid var(--line); padding: 4px 4px 2px 12px; color: var(--muted2); }
+.msg.assistant.settled .md p { color: var(--muted2); }
+.msg-was { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11.5px; letter-spacing: .02em; color: var(--muted2); margin-bottom: 4px; }
+.pc-raw td:first-child { white-space: nowrap; overflow-wrap: normal; }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentCall, AgentThread, api, Asset, AssetGen, Shot, ThreadView } from "./api";
-import { orderedShots, shotStatus, threadSendState } from "./derive";
+import { Change, describeChanges, orderedShots, replyLinks, ReplyLink, shotStatus, threadSendState } from "./derive";
 import Markdown from "./Markdown";
 import MemoryDialog from "./memory/MemoryDialog";
 import { ImageProposalCard, imageStatus, VideoProposalCard, videoStatus } from "./ProposalCards";
@@ -12,7 +12,7 @@ const prettyModel = (m: string) => m.replace(/^gemini-/, "").replace(/^claude-/,
 const providerLabel = (t: { provider: string; model: string }) => (t.provider === "scripted" || t.provider === "replay" ? PROVIDER_NAME[t.provider] : `${PROVIDER_NAME[t.provider] ?? t.provider} ${prettyModel(t.model)}`);
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
-type Block = { key: string; msg?: ThreadView["messages"][number]; calls?: AgentCall[]; proposal?: { call: AgentCall; changes: string[] }; story?: AgentCall; memory?: AgentCall };
+type Block = { key: string; msg?: ThreadView["messages"][number]; calls?: AgentCall[]; proposal?: { call: AgentCall; changes: Change[] }; story?: AgentCall; memory?: AgentCall };
 type Live = { shots: Map<string, Shot>; gens: AssetGen[]; assets: Asset[] };
 
 /** The conversation with the director: the primary way to work on a shot. It lives in the shared right-hand slot,
@@ -140,7 +140,7 @@ export default function Director({ onClose }: { onClose: () => void }) {
       }
       if (c.name === "propose_generation" && !c.result?.is_error && (c.result?.content.proposal_id || c.result?.content.asset_generation_id)) {
         const mine = writes.filter((w) => String(w.input.path ?? "").includes(String(c.input.shot_id ?? "\u0000")));
-        const changes = mine.flatMap((w) => Object.entries((w.result?.content.changed ?? {}) as Record<string, { from: unknown; to: unknown }>).map(([k, v]) => `${k}: ${fmt(v.from)} → ${fmt(v.to)}`));
+        const changes = mine.flatMap((w) => describeChanges(w.result?.content.changed));
         out.push({ key: e.key, proposal: { call: c, changes } }); continue;
       }
       const last = out[out.length - 1];
@@ -149,6 +149,7 @@ export default function Director({ onClose }: { onClose: () => void }) {
     return out;
   }, [view]);
   useEffect(() => { logRef.current?.scrollTo(0, logRef.current.scrollHeight); }, [blocks.length, view?.thread.id, busy]);
+  const links = useMemo(() => (view ? replyLinks(view.messages, view.tool_calls) : new Map<number, ReplyLink[]>()), [view]);
 
   const inline = new Set(blocks.flatMap((b) => (b.proposal ? [String(b.proposal.call.result!.content.proposal_id ?? "")] : [])));
   const focusShot = focusId ? live.shots.get(focusId) : undefined;
@@ -182,7 +183,7 @@ export default function Director({ onClose }: { onClose: () => void }) {
         {!loaded && <p className="muted">Loading…</p>}
         {earlier && <div className="dir-earlier">Earlier conversation · {fmtDate(lastAt)}. It may describe things that have since changed.</div>}
         {loaded && !blocks.length && !(focus?.selected_take_id && focus.locked) && <p className="muted dir-hint">{focus ? `Tell me what to change in ${focusLabel}, or ask me to apply its feedback. I'll prepare a proposal for you to approve.` : "Ask me to draft a film plan, prepare assets, or revise a shot. I can prepare proposals, but only you can approve them."}</p>}
-        {blocks.map((b) => b.msg ? <Message key={b.key} m={b.msg} historical={b.msg.at < sessionStart.current} />
+        {blocks.map((b) => b.msg ? <Message key={b.key} m={b.msg} historical={b.msg.at < sessionStart.current} settled={settledStatus(links.get(b.msg.id), live)} />
           : b.story ? <StoryChatCard key={b.key} call={b.story} S={S} />
           : b.memory ? <MemoryNotice key={b.key} call={b.memory} />
           : b.proposal ? <ProposalFor key={b.key} call={b.proposal.call} changes={b.proposal.changes} live={live} S={S} onChanged={changed} />
@@ -234,7 +235,28 @@ function MemoryNotice({ call }: { call: AgentCall }) {
   );
 }
 
-function ProposalFor({ call, changes, live, S, onChanged }: { call: AgentCall; changes: string[]; live: Live; S: ReturnType<typeof useStudio>; onChanged: () => void }) {
+/** For a director reply that reported on proposals: their CURRENT status, when every one of them is no longer
+ *  actionable (completed, dismissed, out of date). Read from the records; null while any is still open or unknown. */
+function settledStatus(ls: ReplyLink[] | undefined, live: Live): { tone: Parameters<typeof Pill>[0]["tone"]; text: string }[] | null {
+  if (!ls?.length) return null;
+  const out = [];
+  for (const l of ls) {
+    let st: ReturnType<typeof videoStatus> | null = null;
+    if (l.proposal_id) {
+      const shot = live.shots.get(l.shot_id ?? "");
+      const p = shot?.proposals.find((x) => x.id === l.proposal_id);
+      st = shot && p ? videoStatus(p, shot) : null;
+    } else {
+      const g = live.gens.find((x) => x.id === l.gen_id);
+      st = g ? imageStatus(g, live.assets.find((a) => a.handle === g.handle)) : null;
+    }
+    if (!st || st.actionable) return null;
+    out.push({ tone: st.tone, text: st.text });
+  }
+  return out;
+}
+
+function ProposalFor({ call, changes, live, S, onChanged }: { call: AgentCall; changes: Change[]; live: Live; S: ReturnType<typeof useStudio>; onChanged: () => void }) {
   const content = call.result!.content;
   if (content.asset_generation_id) {
     const g = live.gens.find((x) => x.id === content.asset_generation_id);
@@ -255,24 +277,28 @@ function ProposalFor({ call, changes, live, S, onChanged }: { call: AgentCall; c
 const LONG = 600;
 /** Messages are shown exactly as stored. A long response from an earlier session starts folded to its opening lines
  *  (the original text, cut, never rewritten or re-summarised); one click shows all of it. */
-function Message({ m, historical }: { m: ThreadView["messages"][number]; historical: boolean }) {
+function Message({ m, historical, settled }: { m: ThreadView["messages"][number]; historical: boolean; settled?: { tone: Parameters<typeof Pill>[0]["tone"]; text: string }[] | null }) {
   const [open, setOpen] = useState(false);
   if (m.kind === "notice") return <div className={`msg notice ${m.content.level}`}>{m.content.text}</div>;
   const text = m.content.text ?? "";
   const user = m.kind === "user";
   const body = (t: string) => (user ? t : <Markdown text={t} />);
+  const was = settled && (                                            // the reply is kept as written; its proposal has moved on
+    <div className="msg-was"><span>Earlier reply · {settled.length === 1 ? "that proposal is now" : "those proposals are now"}</span>
+      {settled.map((c, i) => <Pill key={i} tone={c.tone}>{c.text}</Pill>)}</div>);
+  const cls = `msg ${user ? "user" : "assistant"}${settled ? " settled" : ""}`;
   if (!historical || text.length <= LONG || open) {
-    return <div className={`msg ${user ? "user" : "assistant"}`}>{body(text)}
+    return <div className={cls}>{was}{body(text)}
       {historical && text.length > LONG && <button className="link fold-btn" onClick={() => setOpen(false)}>Fold earlier {user ? "message" : "response"}</button>}</div>;
   }
   const first = text.split(/\n\s*\n/)[0];
   const excerpt = first.length > 240 ? `${first.slice(0, 240).replace(/\s+\S*$/, "")}…` : `${first}…`;
-  return <div className={`msg ${user ? "user" : "assistant"} folded`}>{body(excerpt)}
+  return <div className={`${cls} folded`}>{was}{body(excerpt)}
     <button className="link fold-btn" onClick={() => setOpen(true)}>Show earlier {user ? "message" : "response"}</button></div>;
 }
 
 /** A proposal that is no longer actionable (out of date, dismissed, completed): one line, expandable to the full card. */
-function CompactVideo({ p, shot, S, onChanged, changes }: { p: Shot["proposals"][number]; shot: Shot; S: ReturnType<typeof useStudio>; onChanged: () => void; changes?: string[] }) {
+function CompactVideo({ p, shot, S, onChanged, changes }: { p: Shot["proposals"][number]; shot: Shot; S: ReturnType<typeof useStudio>; onChanged: () => void; changes?: Change[] }) {
   const st = videoStatus(p, shot);
   return (
     <details className="pc-compact"><summary><span className="pc-kind">Video</span> {shot.title || "Untitled shot"} <Pill tone={st.tone}>{st.text}</Pill>

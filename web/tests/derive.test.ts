@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { agentCap, approveBlock, cardTake, defaultTake, imageCap, newConversationLabel, groupByScene, nextAction, orderedShots, shotStatus, spendSummary, takeKind, threadSendState, videoCap } from "../src/derive.ts";
+import { agentCap, approveBlock, cardTake, defaultTake, describeChange, describeChanges, replyLinks, imageCap, newConversationLabel, groupByScene, nextAction, orderedShots, shotStatus, spendSummary, takeKind, threadSendState, videoCap } from "../src/derive.ts";
 
 const take = (n: number, over: Record<string, unknown> = {}) => ({ id: `t${n}`, number: n, state: "succeeded", review: "unreviewed", output_sha: `sha${n}`,
   adapter: "comfy", is_paid: 1, parent_take_id: null, created_at: "", finished_at: null, ...over }) as any;
@@ -161,4 +161,32 @@ test("board grouping: scenes in project order, every shot appears exactly once, 
   assert.deepEqual(g.map((x) => x.scene?.id ?? null), ["sc1", "sc2", "sc3", null]);
   assert.deepEqual(g.map((x) => x.shots.map((s: any) => s.id)), [["a1", "a2"], ["b1"], [], ["gone", "x"]]);
   assert.equal(g.reduce((n, x) => n + x.shots.length, 0), shots.length);
+});
+
+test("proposal changes read as filmmaking labels; raw fields and before/after are kept for the details", () => {
+  const c = describeChanges({ lighting_detail: { from: "", to: "low amber lamp, deep shadow on the steps" }, framing: { from: "wide", to: "close_up" },
+    duration_s: { from: 5, to: 6 }, camera_detail: { from: "slow drift", to: "" } });
+  assert.deepEqual(c.map((x) => [x.label, x.text]), [["Lighting", "low amber lamp, deep shadow on the steps"], ["Framing", "close-up"], ["Duration", "6 s"], ["Camera", "cleared"]]);
+  assert.deepEqual([c[0].field, c[0].from, c[0].to], ["lighting_detail", "", "low amber lamp, deep shadow on the steps"]);
+  assert.equal(describeChange("refs", [], [{ a: 1 }, { a: 2 }]).text, "2 reference images");
+  assert.equal(describeChange("some_new_field", null, "x").label, "Some new field");
+});
+
+test("a director reply links to the proposals created in its own turn, from the records only", () => {
+  const msg = (id: number, kind: string, at: string, text = "", stop?: string) => ({ id, kind, at, content: { text, ...(stop ? { stop } : {}) } }) as any;
+  const call = (id: number, at: string, name: string, result: Record<string, unknown> | null, err = false, input: Record<string, unknown> = { shot_id: "s1" }) =>
+    ({ id, call_id: `c${id}`, name, input, status: "done", started_at: at, finished_at: at, result: result && { content: result, is_error: err, images: [] } }) as any;
+  const messages = [
+    msg(1, "user", "t01", "make it darker"), msg(2, "assistant_text", "t02", "Reading.", "tool_use"),
+    msg(3, "assistant_text", "t05", "The proposal is ready for your approval.", "end"),
+    msg(4, "user", "t06", "and the next shot?"), msg(5, "assistant_text", "t07", "It's ready for your approval too.", "end"),     // no proposal in this turn
+    msg(6, "user", "t08", "try again"), msg(7, "assistant_text", "t10", "ready for your approval", "end")];
+  const calls = [call(1, "t03", "write", { changed: {} }), call(2, "t04", "propose_generation", { proposal_id: "p1" }),
+    call(3, "t09", "propose_generation", { error: "x" }, true)];
+  const links = replyLinks(messages, calls);
+  assert.deepEqual(links.get(3), [{ proposal_id: "p1", shot_id: "s1" }]);
+  assert.equal(links.has(2), false);        // the narration that issued the call isn't the report on it
+  assert.equal(links.has(5), false);        // same wording, but no proposal in its turn: not linked
+  assert.equal(links.has(7), false);        // a failed proposal links nothing
+  assert.deepEqual(replyLinks(messages, [call(4, "t04", "propose_generation", { asset_generation_id: "g1" }, false, { asset: "lantern" })]).get(3), [{ gen_id: "g1" }]);
 });

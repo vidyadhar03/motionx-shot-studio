@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api, Asset, AssetGen, media, Proposal, Shot, Status, Take } from "./api";
-import { approveBlock } from "./derive";
+import { approveBlock, Change } from "./derive";
 import { useDialogs } from "./dialogs";
 import { CopyButton } from "./shot/Proposal";
 import { TAKE_LABEL } from "./shot/TakeOps";
@@ -15,9 +15,15 @@ function Thumbs({ items }: { items: { sha: string; label: string }[] }) {
   return <div className="pc-thumbs">{items.map((t, i) => <figure key={i} title={t.label}><img src={media(t.sha)} alt={t.label} /><figcaption>{t.label}</figcaption></figure>)}</div>;
 }
 
-function Disclosure({ prompt, rows }: { prompt: string; rows: [string, string][] }) {
+const raw = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : typeof v === "string" ? v : JSON.stringify(v));
+
+function Disclosure({ prompt, rows, changes }: { prompt: string; rows: [string, string][]; changes?: Change[] }) {
   return (
     <details className="pc-details"><summary>Full prompt and details</summary>
+      {changes && changes.length > 0 && (
+        <table className="pc-raw"><caption>Director's edits to the shot (stored fields)</caption>
+          <thead><tr><th>Field</th><th>Before</th><th>After</th></tr></thead>
+          <tbody>{changes.map((c) => <tr key={c.field}><td><code>{c.field}</code></td><td>{raw(c.from)}</td><td>{raw(c.to)}</td></tr>)}</tbody></table>)}
       <dl className="facts">{rows.map(([k, v]) => <><dt key={`k${k}`}>{k}</dt><dd key={`v${k}`}>{v}</dd></>)}</dl>
       <div className="prompt-tools"><CopyButton text={prompt} label="Copy prompt" /></div>
       <pre className="prompt-text">{prompt}</pre>
@@ -51,7 +57,7 @@ export function imageStatus(g: AssetGen, asset: Asset | undefined): Chip & { act
 }
 
 export function VideoProposalCard({ proposal: p, shot, status, changes, onChanged, onOpenShot, onOpenTake }: {
-  proposal: Proposal; shot: Shot; status: Status; changes?: string[]; onChanged: () => void; onOpenShot: () => void; onOpenTake: () => void;
+  proposal: Proposal; shot: Shot; status: Status; changes?: Change[]; onChanged: () => void; onOpenShot: () => void; onOpenTake: () => void;
 }) {
   const { confirm } = useDialogs();
   const [busy, setBusy] = useState(false);
@@ -83,7 +89,7 @@ export function VideoProposalCard({ proposal: p, shot, status, changes, onChange
       {p.status === "stale" && <div className="pc-note warn">{p.stale_reason ?? "The shot changed after this was prepared"}. It can't be approved; prepare a new one.</div>}
       <Thumbs items={thumbs} />
       <div className="pc-summary">{p.note || "A take from the shot's current direction."}</div>
-      {changes && changes.length > 0 && <ul className="pc-changes">{changes.map((c) => <li key={c}>{c}</li>)}</ul>}
+      {changes && changes.length > 0 && <ul className="pc-changes" aria-label="What the director changed">{changes.map((c) => <li key={c.field}><span className="pc-ch-label">{c.label}</span><span>{c.text}</span></li>)}</ul>}
       <div className="chips">
         <span className="chip muted">MiniMax H3 · {p.workflow_id === "h3_reference" ? "references" : "first frame"}</span>
         <span className="chip muted">{p.request.duration_s}s · {p.request.resolution}{p.workflow_id === "h3_reference" && p.request.aspect_ratio ? ` · ${p.request.aspect_ratio}` : ""}</span>
@@ -102,7 +108,7 @@ export function VideoProposalCard({ proposal: p, shot, status, changes, onChange
       {take && take.state === "succeeded" && take.review === "unreviewed" && shot.selected_take_id !== take.id && (
         <div className="pc-actions"><button className="btn-review" onClick={onOpenTake}>Review take {take.number}</button><span className="muted">Reviewing never generates anything.</span></div>)}
       {err && <div className="reason" role="alert">{err}</div>}
-      <Disclosure prompt={p.resolved_prompt} rows={[["Proposed by", `${p.created_by === "agent" ? "the director" : p.created_by} · ${fmtDateTime(p.created_at)}`], ["Shot revision", String(p.shot_revision)], ["Seed", String(p.request.seed)], ["Workflow", p.workflow_id]]} />
+      <Disclosure prompt={p.resolved_prompt} rows={[["Proposed by", `${p.created_by === "agent" ? "the director" : p.created_by} · ${fmtDateTime(p.created_at)}`], ["Shot revision", String(p.shot_revision)], ["Seed", String(p.request.seed)], ["Workflow", p.workflow_id]]} changes={changes} />
     </div>
   );
 }

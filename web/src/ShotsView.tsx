@@ -411,6 +411,7 @@ function CompareView({ cur, cmp, setCmp, busy, onChoose, onFeedback, msg, showDi
         <div className="cmp-top">
           <b className="cmp-label">Take {t?.number ?? "?"}</b>
           {t && (t.id === cur.selected_take_id ? <Pill tone="accent">✓ Selected</Pill> : t.review === "approved" ? <Pill tone="ok">Approved</Pill> : t.review === "rejected" ? <Pill tone="bad">Rejected</Pill> : <Pill tone="info">Needs review</Pill>)}
+          {t?.adapter === "fake" && <Pill tone="warn">FAKE placeholder</Pill>}
           <label className="cmp-pick">Change
             <select aria-label={`${which === "a" ? "Left" : "Right"} take`} value={id} onChange={(e) => setCmp({ ...cmp, [which]: e.target.value })}>
               {ready.map((x) => <option key={x.id} value={x.id}>Take {x.number}{x.id === cur.selected_take_id ? " (selected)" : ""}{x.review !== "unreviewed" ? ` · ${x.review}` : ""}</option>)}

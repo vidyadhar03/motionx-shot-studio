@@ -113,7 +113,7 @@ The app remembers the last project, section, shot and asset per workspace (and i
 
 ### Showcase workspace (screenshots and demos)
 
-`scripts/showcase.py build --dir <dir>` then `serve --dir <dir> --port 8710` creates an isolated workspace with neutral fictional sample content (procedural "SAMPLE ART" images, fake-adapter placeholder clips, a scripted and labelled mock director). It makes no model, image or video calls and never touches your real workspace. The captured set and its index are in `demo/showcase/`.
+`scripts/showcase.py build --dir <dir>` then `serve --dir <dir> --port 8710` creates an isolated workspace with neutral fictional sample content (procedural "SAMPLE ART" images, fake-adapter placeholder clips, a scripted and labelled mock director). It makes no model, image or video calls and never touches your real workspace. It holds one film, "The Last Light"; `build --stage start` gives the same film before it has a story, for the start and story screens. The captured set and its index are in `demo/showcase/`.
 
 ## Story before shots
 

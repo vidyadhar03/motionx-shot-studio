@@ -1,6 +1,6 @@
 // Pure view logic: what state a shot/take is in, what to do next, what spending is available.
 // No React, no fetches. Covered by web/tests/derive.test.ts (node --test).
-import type { AgentConfig, OverviewShot, OverviewTake, Preparation, Scene, Status } from "./api";
+import type { AgentCall, AgentConfig, AgentMessage, OverviewShot, OverviewTake, Preparation, Scene, Status } from "./api";
 
 export const ACTIVE_STATES = new Set(["queued", "submitting", "submitted", "running", "generated"]);
 export const ATTENTION_STATES = new Set(["submission_unknown", "poll_timeout", "import_failed"]);
@@ -240,4 +240,55 @@ export function threadSendState(thread: { provider: string; model: string }, c: 
 export function newConversationLabel(c: AgentConfig | null): string {
   if (!c) return "…";
   return c.provider === "scripted" ? "the offline stand-in (rules, not an AI)" : c.provider === "replay" ? "the replay mock (hand-written answers)" : `${c.provider} ${c.model} (live)`;
+}
+
+/** A director edit to a shot, as it appears on a proposal: a filmmaking label and the new value in plain words. The
+ *  raw field name and before/after values stay available for the details view. */
+export type Change = { field: string; label: string; text: string; from: unknown; to: unknown };
+const CHANGE_LABEL: Record<string, string> = {
+  title: "Title", intention: "Purpose", action: "Action", framing: "Framing", end_framing: "Ending framing", camera_move: "Camera move",
+  camera_detail: "Camera", lens_look: "Lens", lighting: "Lighting style", lighting_detail: "Lighting", depth_of_field: "Depth of field",
+  audio: "Sound", duration_s: "Duration", mode: "Generation mode", aspect_ratio: "Aspect ratio", refs: "References", scene_id: "Scene",
+};
+export function describeChange(field: string, from: unknown, to: unknown): Change {
+  const label = CHANGE_LABEL[field] ?? field.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+  const empty = to === null || to === undefined || to === "" || (Array.isArray(to) && !to.length);
+  let text: string;
+  if (empty) text = "cleared";
+  else if (field === "duration_s") text = `${to} s`;
+  else if (field === "refs") text = `${(to as unknown[]).length} reference image${(to as unknown[]).length === 1 ? "" : "s"}`;
+  else if (field === "mode") text = to === "reference" ? "from references" : to === "first_frame" ? "from a start frame" : String(to);
+  else if (field === "scene_id") text = "moved to another scene";
+  else if (typeof to === "string") text = /^[a-z0-9]+(_[a-z0-9]+)+$/.test(to) ? to.replace("close_up", "close-up").replace(/_/g, " ") : to;
+  else text = JSON.stringify(to);
+  return { field, label, text, from, to };
+}
+export const describeChanges = (changed: Record<string, { from: unknown; to: unknown }> | undefined): Change[] =>
+  Object.entries(changed ?? {}).map(([k, v]) => describeChange(k, v.from, v.to));
+
+/** Which proposals a director reply reports on, from the stored records: the proposals created by successful
+ *  propose_generation calls in the same turn (the person's message up to their next one), linked to that turn's final
+ *  replies (stop other than "tool_use", which are written after every tool result of the turn). Never from wording. */
+export type ReplyLink = { proposal_id?: string; shot_id?: string; gen_id?: string };
+export function replyLinks(messages: AgentMessage[], calls: AgentCall[]): Map<number, ReplyLink[]> {
+  const users = messages.filter((m) => m.kind === "user").sort((a, b) => a.id - b.id);
+  const turnOf = (at: string) => { let k = -1; users.forEach((u, i) => { if (u.at <= at) k = i; }); return k; };
+  const byTurn = new Map<number, ReplyLink[]>();
+  for (const c of calls) {
+    const r = c.result?.content;
+    if (c.name !== "propose_generation" || c.result?.is_error || !r) continue;
+    const link: ReplyLink | null = r.proposal_id ? { proposal_id: String(r.proposal_id), shot_id: String(c.input.shot_id ?? "") }
+      : r.asset_generation_id ? { gen_id: String(r.asset_generation_id) } : null;
+    if (!link) continue;
+    const k = turnOf(c.started_at);
+    if (k >= 0) byTurn.set(k, [...(byTurn.get(k) ?? []), link]);
+  }
+  const out = new Map<number, ReplyLink[]>();
+  if (!byTurn.size) return out;
+  let k = -1;
+  for (const m of [...messages].sort((a, b) => a.id - b.id)) {
+    if (m.kind === "user") { k = users.indexOf(m); continue; }
+    if (m.kind === "assistant_text" && m.content?.stop !== "tool_use" && byTurn.has(k)) out.set(m.id, byTurn.get(k)!);
+  }
+  return out;
 }

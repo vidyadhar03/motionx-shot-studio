@@ -1,12 +1,16 @@
 """Showcase workspace: neutral, fictional sample content for screenshots and demos. Never touches your real workspace.
 
     .venv/bin/python scripts/showcase.py build [--dir DIR]    # build a fresh isolated workspace (default: runtime/showcase)
+    .venv/bin/python scripts/showcase.py build --stage start --dir DIR    # the same film before it has a story
     .venv/bin/python scripts/showcase.py serve [--dir DIR] [--port 8710]
 
 Everything is generated from code (scripts/showcase_art.py): no third-party images and nothing from any real project.
 Images carry a "SAMPLE ART" tag. Takes come from the fake adapter (labelled FAKE in the app), and the director
 conversations are played back from a hand-written script through the real tools (labelled as a mock). No model, image
 or video service is called. Open it with the "ISOLATED WORKSPACE" badge on.
+
+One film throughout, "The Last Light". The stairs' two sample takes are graded by a fixture (LOOKS) from the lighting
+words in each request, to illustrate the lighting change the feedback asks for; they are not model results.
 """
 from __future__ import annotations
 
@@ -47,6 +51,22 @@ def png(img: Image.Image) -> bytes:
     return b.getvalue()
 
 
+# Sample lighting looks (a showcase fixture, not a model): when the request's lighting words match, the placeholder clip's
+# frame is graded to that look, so the two sample takes of the stairs differ visibly in the way the feedback describes.
+LOOKS = (("deep shadow", "low_amber"), ("bright, even light", "flat_bright"))
+
+
+def grade(im: Image.Image, look: str) -> Image.Image:
+    if look == "flat_bright":                                   # even, washed-out light: shadows lifted, little contrast or colour
+        im = ImageEnhance.Brightness(im).enhance(2.3)
+        im = Image.blend(im, Image.new("RGB", im.size, (236, 230, 218)), 0.42)
+        im = ImageEnhance.Color(ImageEnhance.Contrast(im).enhance(0.55)).enhance(0.45)
+    elif look == "low_amber":                                   # restrained amber lamp, steps falling into deep shadow
+        im = ImageEnhance.Contrast(ImageEnhance.Brightness(im).enhance(0.8)).enhance(1.5)
+        im = art.vignette(Image.blend(im, Image.new("RGB", im.size, (255, 135, 40)), 0.08), 1.0)
+    return art.tag(im)
+
+
 class ShowcaseAdapter(FakeAdapter):
     """The fake adapter, but its placeholder clips are slow moves over the sample art (still no network, no cost)."""
 
@@ -70,6 +90,9 @@ class ShowcaseAdapter(FakeAdapter):
         im = frame[1].convert("RGB").resize((1280, 720))
         mix = zlib.crc32(str(request.get("prompt", "")).encode())       # a revised prompt gives a visibly different take
         k = (seed + mix) % 5
+        look = next((name for words, name in LOOKS if words in str(request.get("prompt", "")).lower()), None)
+        if look:
+            im, k = grade(im, look), 0
         if k == 1:
             im = Image.blend(im, Image.new("RGB", im.size, (40, 70, 130)), 0.22)
         elif k == 2:
@@ -106,29 +129,27 @@ STORY_A = {
     "beats": [
         {"key": "b1", "text": "Boats settle into the harbour as the light fades.", "adds": "The world the light serves.", "origin": "from_you"},
         {"key": "b2", "text": "The keeper walks the quay with his lantern, as he has for decades.", "adds": "The man and his routine.", "origin": "from_you"},
-        {"key": "b3", "text": "He climbs the spiral stairs, slower than he used to.", "adds": "Effort and age: the climb carries the film's weight.", "origin": "added"},
+        {"key": "b3", "text": "He climbs the spiral stairs under a low lamp, slower than he used to.", "adds": "Effort and age: the climb carries the film's weight.", "origin": "from_you"},
         {"key": "b4", "text": "He stops, one hand on the rail, and looks out of a small window.", "adds": "His attention shifts from duty to memory.", "origin": "added"},
         {"key": "b5", "text": "In the lamp room he lights the lamp by hand.", "adds": "The ritual at the centre of the film.", "origin": "from_you"},
         {"key": "b6", "text": "The beam crosses the water; small lights answer from the boats.", "adds": "The reason it mattered, shown not explained.", "origin": "added"}],
     "ending": "The beam sweeps the dark harbour while small lights answer from the boats.",
     "ending_why": "The light's purpose is answered by the boats, which is what the keeper's work was for.",
     "duration_target_s": 45, "form": "observational",
-    "self_check": {"repetition": "Each beat shows a different stage of the evening.", "assumptions": "The stairs and the window are additions.",
+    "self_check": {"repetition": "Each beat shows a different stage of the evening.", "assumptions": "The pause at the window and the answering lights are additions.",
                    "ending": "It follows from the lamp being lit by hand."}}
-STORY_B = {
-    "premise": "After the rain, a child launches paper boats in a gutter and follows them down the street.",
-    "explores": "How small play turns an ordinary street into a journey.",
-    "audience": "Share the child's delight and the small worry of letting something go.",
-    "development": "The boats travel further each time; the child's attention moves from the boats to the street itself.",
-    "beats": [
-        {"key": "b1", "text": "A child folds a paper boat on a doorstep while the rain thins out.", "adds": "The wish to play, before the play starts.", "origin": "from_you"},
-        {"key": "b2", "text": "The first boat is set on the gutter and sails off faster than expected.", "adds": "Delight, then a small surprise.", "origin": "added"},
-        {"key": "b3", "text": "The child runs alongside it past shopfronts and puddles.", "adds": "The street becomes a river.", "origin": "added"},
-        {"key": "b4", "text": "The boat slips into a drain; the child waves and goes back for more paper.", "adds": "Letting go, and starting again.", "origin": "from_you"}],
-    "ending": "The child folds a new boat, a little larger than the first.",
-    "ending_why": "The loss is not mourned; the play simply begins again, which is what the film is about.",
-    "duration_target_s": 30, "form": "observational"}
-
+IDEA = ("On the evening before the lighthouse is automated, its old keeper walks the quay with his lantern while the boats settle, "
+        "climbs the tower one last time and lights the lamp by hand. The audience should feel the quiet dignity of finishing work "
+        "that is about to become unnecessary.")
+SCRIPT_TITLE = "The Last Light"
+SCRIPT = ("EXT. HARBOUR – DUSK\n\nBoats settle at their moorings. On the quay, the KEEPER (70s) lifts his lantern and walks toward the "
+          "lighthouse.\n\nINT. LIGHTHOUSE STAIRS – CONTINUOUS\n\nHe climbs slowly, one hand on the rail. At a small window he stops and "
+          "looks back at the harbour.\n\nINT. LAMP ROOM – NIGHT\n\nHe strikes a match and lights the lamp by hand.\n\nEXT. HARBOUR – "
+          "NIGHT\n\nThe beam crosses the water. One by one, small lights answer from the boats.")
+STORY_PLAN = {"title": "The Last Light", "logline": "An old keeper lights the lamp by hand one last time.", "story": STORY_A,
+              "observed": ["An old keeper on the evening before the light is automated: the quay, the climb, the lamp lit by hand."],
+              "creative_additions": ["The pause at the small window.", "Small lights answering from the boats at the end."],
+              "guardrails": ["No dialogue.", "Nothing explains the keeper's feelings."]}
 SHOTS = [  # key, title, intention, frame, framing, move, scene, assets, beats, serves, duration
     ("s1", "Boats at rest", "Show the harbour settling for the night.", "harbour", "wide", "static", 0, ["harbour"], ["b1"], "A still wide frame lets the harbour breathe before anyone appears.", 6),
     ("s2", "The keeper on the quay", "Introduce the keeper and his lantern.", "quay", "medium", "static", 0, ["harbour", "keeper", "lantern"], ["b2"], "One patient frame on the man and his routine.", 5),
@@ -140,7 +161,7 @@ SCENES = ["Harbour at dusk", "The climb", "The lamp room"]
 
 
 def script_sessions(ids: dict) -> list[dict]:
-    s3, s4 = ids["s3"], ids["s4"]
+    s3, s4 = ids.get("s3", "-"), ids.get("s4", "-")
     mem = lambda m, patch, reply: {"match": m, "turns": [{"text": "Noted.", "calls": [{"name": "write", "input": {"path": "/memory", "patch": patch}}]}, {"text": reply}]}  # noqa: E731
     return [
         mem("^Please keep your replies short", {"text": "Keep replies short and in plain filmmaking language.", "scope": "personal", "topic": "interaction",
@@ -149,13 +170,13 @@ def script_sessions(ids: dict) -> list[dict]:
             "quote": "No music in this film"}, "Understood: the sea and the lamp carry the sound."),
         mem("^Perhaps something more patient", {"text": "Seems to prefer slow, patient camera moves.", "scope": "project", "topic": "camera",
             "quote": "prefers slow, patient camera moves"}, "I'll keep the camera patient and tell you if a shot needs more movement."),
-        {"match": "^The stairs take felt too bright", "turns": [
+        {"match": "^The stairs take is too bright", "turns": [
             {"text": "Reading the shot.", "calls": [{"name": "read", "input": {"path": f"/shots/{s3}"}}]},
-            {"text": "Slowing the climb and lowering the lamp.", "calls": [
+            {"text": "Lowering the lamp and letting the steps go dark.", "calls": [
                 {"name": "write", "input": {"path": f"/shots/{s3}", "expected_revision": "{{r:t0c0:revision}}",
-                 "patch": {"camera_detail": "slow, laboured upward drift", "lighting_detail": "low warm lamp, deep shadow on the steps"}}},
-                {"name": "propose_generation", "input": {"shot_id": s3, "note": "A slower, more tired climb under a lower lamp."}}]},
-            {"text": "I slowed the climb and lowered the lamp so the stairs feel heavier. The new proposal is ready for your approval."}]},
+                 "patch": {"lighting_detail": "restrained amber lamp from above, deep shadow on the steps"}}},
+                {"name": "propose_generation", "input": {"shot_id": s3, "note": "The same climb under a low amber lamp, the steps falling into shadow."}}]},
+            {"text": "I replaced the bright, even light with a restrained amber lamp and let the steps fall into shadow. The new proposal is ready for your approval."}]},
         {"match": "^For the hand on the rail", "turns": [
             {"text": "Reading the shot.", "calls": [{"name": "read", "input": {"path": f"/shots/{s4}"}}]},
             {"text": "Setting the move and the light, then preparing a proposal.", "calls": [
@@ -165,14 +186,13 @@ def script_sessions(ids: dict) -> list[dict]:
             {"text": "A quiet push-in with cool window light against the warm lamp behind. The proposal is waiting for your approval."}]},
         {"match": "^Help me develop this idea", "turns": [
             {"text": "Reading your idea.", "calls": [{"name": "read", "input": {"path": "/"}}, {"name": "read", "input": {"path": "/skills/story-development"}}]},
-            {"text": "Writing a story draft.", "calls": [{"name": "write", "input": {"path": "/plan", "note": "first story draft", "patch": {
-                "title": "Paper Boats", "story": STORY_B, "observed": ["A child launches paper boats in a rain-filled gutter."], "creative_additions": ["The drain at the end."]}}}]},
-            {"text": "Here's a first story draft, built around the boats travelling further each time. I added the drain at the end; the rest follows your idea. Read it, change anything, and approve it when it says what you want."}]},
+            {"text": "Writing a story draft.", "calls": [{"name": "write", "input": {"path": "/plan", "note": "first story draft", "patch": STORY_PLAN}}]},
+            {"text": "Here's a first story draft that follows the keeper's last evening, from the quay to the lamp. I added the pause at the window and the lights answering from the boats; the rest is your idea. Read it, change anything, and approve it when it says what you want."}]},
         {"match": "^hello", "turns": [{"text": "Hello. What would you like to work on?"}]},
     ]
 
 
-def build(data_dir: Path) -> dict:
+def build(data_dir: Path, stage: str = "film") -> dict:
     if data_dir.exists():
         if not (data_dir / "workspace.json").exists() or json.loads((data_dir / "workspace.json").read_text()).get("kind") != "isolated":
             sys.exit(f"{data_dir} exists and isn't an isolated showcase workspace; refusing to touch it")
@@ -188,10 +208,19 @@ def build(data_dir: Path) -> dict:
     (data_dir / "demo_script.json").write_text("{}")
     put = lambda img: media.put_image(png(img)).sha256  # noqa: E731
 
-    # ---- project A: a film in progress --------------------------------------------------------------------------------
-    A = ops.create_project("The Last Light", "On the evening before a lighthouse is automated, its old keeper climbs to light the lamp by hand. "
-                           "Demo project with sample content.", {"tone": "quiet, observational", "palette": "dusk amber against deep blue",
-                                                                  "notes": "no music; the sea and the lamp are the sound"})["id"]
+    direction = {"tone": "quiet, observational", "palette": "dusk amber against deep blue", "notes": "no music; the sea and the lamp are the sound"}
+    runner = AgentRunner(s, ops, service, media, store)
+    notice = {"level": "warn", "text": "Demo conversation: scripted sample content played back through the real tools, not model output."}
+    if stage == "start":
+        # ---- the same film before it has a story: the start screen, then a scripted story draft sent from the UI ----------
+        A = ops.create_project("The Last Light", "", direction)["id"]
+        (data_dir / "demo_script.json").write_text(json.dumps({"label": "demo script", "sessions": script_sessions({})}))
+        store.append(runner.create_thread(A)["id"], "notice", notice)
+        print(f"showcase workspace (start stage) ready: {data_dir}")
+        return {"A": A}
+
+    # ---- the film in progress ------------------------------------------------------------------------------------------
+    A = ops.create_project("The Last Light", IDEA, direction)["id"]
     keeper = ops.create_asset(A, kind="character", name="The keeper", handle="keeper", description="An old lighthouse keeper in a long coat and cap, carrying a lantern.",
                               media_sha=put(art.keeper_portrait(1)), provenance="Sample art generated by scripts/showcase_art.py (demo content).")
     ops.add_asset_version(keeper["id"], media_sha=put(art.keeper_portrait(2)), description="The keeper in a heavier coat, cap pulled low.",
@@ -202,9 +231,7 @@ def build(data_dir: Path) -> dict:
                                media_sha=put(art.lantern_prop()), provenance="Sample art generated by scripts/showcase_art.py (demo content).")
     ops.add_asset_version(lantern["id"], media_sha=put(art.lantern_prop().transpose(Image.FLIP_LEFT_RIGHT)), origin="generated", hold_for_review=True,
                           description="The lantern, a slightly larger brass model.", provenance="Sample variant, demo content (not a model result).")
-    story_plan = {"title": "The Last Light", "logline": "An old keeper lights the lamp by hand one last time.", "story": STORY_A,
-                  "observed": ["An old keeper on the evening before the light is automated."], "creative_additions": ["The spiral stairs and the small window."],
-                  "guardrails": ["No dialogue.", "Nothing explains the keeper's feelings."]}
+    story_plan = STORY_PLAN
     p = planning.write_plan(A, story_plan, expected_revision=None, author="agent", note="first story draft (demo)")
     planning.approve_story(p["id"], 1)
     plan_shots = [{"key": k, "title": t, "intention": i, "action": i, "framing": fr, "camera_move": mv, "duration_s": d, "assets": a, "beats": b, "serves": sv}
@@ -225,13 +252,15 @@ def build(data_dir: Path) -> dict:
         frame_sha[k] = put(art.FRAMES[f](0))
         sh = ops.get_shot(shot_id[k])
         patch = {"scene_id": scenes[sc]}
+        if k == "s3":                                                    # the first take's light, which the feedback asks to change
+            patch["lighting_detail"] = "bright, even light across the steps"
         if k not in ("s4", "s6"):                                       # first-frame shots render from their sample frame
             patch |= {"mode": "first_frame", "start_frame_sha": frame_sha[k], "refs": []}
         else:                                                            # reference-mode shots keep their pinned references
             patch |= {"refs": [{"asset_version_id": r["asset_version_id"]} for r in sorted(
                 sh["refs_resolved"], key=lambda r: 0 if r["kind"] == "location" else 1)]}
         ops.update_shot(sh["id"], patch, sh["revision"])
-    s7 = ops.create_shot(A, {"title": "Logbook insert", "intention": "A detail of the keeper's last entry.", "framing": "insert", "camera_move": "static",
+    s7 = ops.create_shot(A, {"title": "Logbook insert", "intention": "The keeper's last entry in the logbook; not yet placed in a scene.", "framing": "insert", "camera_move": "static",
                              "duration_s": 4, "mode": "first_frame", "start_frame_sha": put(art.desk(0))})
     shot_id["s7"] = s7["id"]
     s8 = ops.create_shot(A, {"title": "The keeper looks up", "intention": "A glance toward the lamp room, before the climb.", "framing": "close_up",
@@ -253,7 +282,7 @@ def build(data_dir: Path) -> dict:
     ops.set_locked(shot_id["s1"], True)
     take("s2", 12)
     bad = take("s3", 21, review="rejected")
-    fb = ops.add_feedback(bad["id"], "motion", "Too bright and too static. The climb should feel slower and more tired.")
+    fb = ops.add_feedback(bad["id"], "lighting", "Too bright and flat: the whole stairwell is evenly lit. Keep the lamp low and amber and let the steps fall into deep shadow.")
     memory.record_feedback_example(fb["feedback"][-1]["id"])
     take("s5", 30, review="approved")
     take("s7", 40, review="approved", select=True)
@@ -261,15 +290,14 @@ def build(data_dir: Path) -> dict:
     (data_dir / "demo_script.json").write_text(json.dumps({"label": "demo script", "sessions": script_sessions(ids)}))
 
     # ---- demo conversation (played back from the script through the real tools; labelled as a mock) ------------------
-    runner = AgentRunner(s, ops, service, media, store)
     th0 = runner.create_thread(A)["id"]
     for text in ("Please keep your replies short and in plain filmmaking language from now on.",
                  "No music in this film. The sea and the lamp are the soundtrack.",
                  "Perhaps something more patient with the camera?"):
         runner.send(th0, text, None)
     th1 = runner.create_thread(A)["id"]
-    store.append(th1, "notice", {"level": "warn", "text": "Demo conversation: scripted sample content played back through the real tools, not model output."})
-    runner.send(th1, "The stairs take felt too bright and too static. Make the climb slower and more tired, and keep the lamp low.", shot_id["s3"])
+    store.append(th1, "notice", notice)
+    runner.send(th1, "The stairs take is too bright and flat. Keep the lamp low and amber, and let the steps fall into deep shadow.", shot_id["s3"])
     prop3 = next(x for x in ops.get_shot(shot_id["s3"])["proposals"] if x["status"] == "pending")
     t2, _ = service.approve(prop3["id"], "user")
     service.run(t2["id"])
@@ -277,16 +305,8 @@ def build(data_dir: Path) -> dict:
     ops.select_take(shot_id["s3"], t2["id"])
     runner.send(th1, "For the hand on the rail, give me a quiet, patient shot: slow push-in, cool window light, nothing flashy.", shot_id["s4"])
 
-    # ---- project B: an idea at the story-draft stage -------------------------------------------------------------------
-    B = ops.create_project("Paper Boats", "After the rain, a child launches paper boats in a gutter and follows them down the street.",
-                           {"tone": "light, observational"})["id"]
-    thb = runner.create_thread(B)["id"]
-    store.append(thb, "notice", {"level": "warn", "text": "Demo conversation: scripted sample content played back through the real tools, not model output."})
-    runner.send(thb, "Help me develop this idea into a short story draft for my review, before any shots: what it explores, what the audience should notice or feel, how it develops, the beats and the ending.", None)
-    # ---- project C: an empty project for the start screen -----------------------------------------------------------------
-    ops.create_project("New film", "", {})
     print(f"showcase workspace ready: {data_dir}")
-    return {"A": A, "B": B}
+    return {"A": A}
 
 
 def serve(data_dir: Path, port: int) -> None:
@@ -306,5 +326,7 @@ if __name__ == "__main__":
     ap.add_argument("cmd", choices=["build", "serve"])
     ap.add_argument("--dir", type=Path, default=DEFAULT_DIR)
     ap.add_argument("--port", type=int, default=8710)
+    ap.add_argument("--stage", choices=["film", "start"], default="film",
+                    help="film: the film in progress (default); start: the same film before it has a story, for the start and story screens")
     a = ap.parse_args()
-    build(a.dir) if a.cmd == "build" else serve(a.dir, a.port)
+    build(a.dir, a.stage) if a.cmd == "build" else serve(a.dir, a.port)
