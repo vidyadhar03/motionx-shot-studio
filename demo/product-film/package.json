@@ -1,0 +1,27 @@
+{
+  "name": "motionx-product-film",
+  "private": true,
+  "version": "1.0.0",
+  "description": "55-second 2D motion-graphics product film for MotionX Shot Studio (Remotion).",
+  "type": "module",
+  "scripts": {
+    "assets": "node scripts/prepare-assets.mjs && node scripts/make-audio.mjs",
+    "studio": "npm run assets && remotion studio src/index.ts",
+    "render": "npm run assets && remotion render src/index.ts ProductFilm out/motionx-shot-studio-demo.mp4 --codec=h264 --pixel-format=yuv420p --crf=16 --audio-codec=aac --audio-bitrate=192k",
+    "stills": "node scripts/stills.mjs",
+    "contact-sheet": "node scripts/contact-sheet.mjs",
+    "verify": "node scripts/verify.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.539",
+    "@remotion/google-fonts": "4.0.539",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "remotion": "4.0.539"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.2",
+    "typescript": "5.9.3"
+  }
+}

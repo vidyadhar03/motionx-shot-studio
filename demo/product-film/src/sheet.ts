@@ -1,0 +1,23 @@
+// Frames shown on the contact sheet: [frame, what it shows].
+export const SHEET_FRAMES: [number, string][] = [
+  [20, 'Hook · wordmark'],
+  [120, 'Hook · the Board'],
+  [240, 'Story · from an idea'],
+  [330, 'Story · or your script'],
+  [455, 'Story · review and approval'],
+  [520, 'Organize · every scene'],
+  [570, 'Organize · every shot'],
+  [700, 'Organize · every reference'],
+  [860, 'Direct · give direction'],
+  [915, 'Direct · chat scrolls to its proposal'],
+  [975, 'Direct · review before generation'],
+  [1060, 'Review · compare'],
+  [1130, 'Review · choose, keep takes'],
+  [1250, 'Memory · tentative until confirmed'],
+  [1320, 'Memory · review, correct or forget'],
+  [1430, 'Export · selected takes'],
+  [1465, 'Export · ZIP + manifest'],
+  [1545, 'Built on ComfyUI'],
+  [1600, 'End card · resolving'],
+  [1649, 'End card · final frame'],
+];
